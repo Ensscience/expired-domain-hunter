@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      reset_state:
+        description: "Clear cached processed-domain state for a fresh manual verification"
+        required: false
+        default: false
+        type: boolean
       availability_budget:
         description: "Maximum Verisign .COM RDAP checks for this manual run"
         required: false
@@ -41,6 +46,10 @@ jobs:
           key: expired-domain-hunter-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             expired-domain-hunter-state-${{ github.ref_name }}-
+
+      - name: Reset state for explicit manual verification
+        if: ${{ inputs.reset_state == true }}
+        run: rm -rf .state
 
       - name: Set up Python
         uses: actions/setup-python@v5
