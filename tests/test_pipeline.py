@@ -24,6 +24,34 @@ class FakeChecker:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_rdap_budget_selects_best_initial_score_not_input_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "domains.csv"
+            input_path.write_text(
+                "domain,status,source\n"
+                "qzxvnr.com,expired,source-a\n"
+                "smartinvoices.com,expired,source-a\n"
+                "longuncommercialnameexample.com,expired,source-a\n",
+                encoding="utf-8",
+            )
+            checker = FakeChecker({"smartinvoices.com": AVAILABLE})
+            evaluations, stats, rejected = run(
+                input_path,
+                root / "output",
+                skip_wayback=True,
+                max_wayback=0,
+                availability_checker=checker,
+                state=ProcessState(root / "state.json"),
+                max_availability=1,
+            )
+            self.assertEqual(rejected, [])
+            self.assertEqual(stats["initial_scored"], 3)
+            self.assertEqual(stats["rdap_selected"], 1)
+            self.assertEqual(stats["rdap_deferred"], 2)
+            self.assertEqual(checker.calls, ["smartinvoices.com"])
+            self.assertEqual(stats["available"], 1)
+
     def test_only_available_candidates_enter_quality_and_scoring_pipeline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

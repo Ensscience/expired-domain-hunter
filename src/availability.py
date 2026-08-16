@@ -27,6 +27,11 @@ RDAP_ENDPOINT = "https://rdap.verisign.com/com/v1/domain/"
 USER_AGENT = "expired-domain-hunter/1.1 (+https://github.com/Ensscience/expired-domain-hunter)"
 
 
+def rdap_url(domain: str) -> str:
+    normalized = domain.lower().strip().rstrip(".")
+    return f"{RDAP_ENDPOINT}{quote(normalized, safe='')}"
+
+
 @dataclass
 class AvailabilityResult:
     domain: str
@@ -58,7 +63,7 @@ class VerisignRdapChecker:
     def check(self, domain: str) -> AvailabilityResult:
         normalized = domain.lower().strip().rstrip(".")
         now = datetime.now(timezone.utc).isoformat()
-        url = f"{RDAP_ENDPOINT}{quote(normalized, safe='')}"
+        url = rdap_url(normalized)
         if not is_valid_com_domain(normalized):
             return AvailabilityResult(normalized, UNKNOWN, now, url, reason="invalid .COM domain")
         if normalized in self.cache:

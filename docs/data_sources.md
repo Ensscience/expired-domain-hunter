@@ -24,7 +24,7 @@ The official [ExpiredDomains.net FAQ](https://www.expireddomains.net/faq/) says 
 
 ## Current availability verification
 
-Before quality filtering, history checks, scoring, or alerting, every candidate is checked against Verisign’s authoritative `.COM` RDAP service:
+After lifecycle filtering, `.COM` filtering, cheap local quality/spam filtering, and neutral-history initial scoring, only the strongest candidates up to the configured budget are checked against Verisign’s authoritative `.COM` RDAP service. Wayback/history enrichment and final scoring occur only for candidates that are verified `AVAILABLE`:
 
 - Official Verisign RDAP help: [Registration Data Access Protocol Help](https://www.verisign.com/news-insights/registration-data-access-protocol/help/)
 - IANA registry mapping: [Bootstrap Service Registry for Domain Name Space](https://www.iana.org/assignments/rdap-dns/rdap-dns.xhtml)
@@ -42,6 +42,10 @@ The implementation uses these outcomes:
 | `UNKNOWN` | Timeout, malformed response, rate limit, access restriction, server error, or other inconclusive response | No |
 
 An RDAP 404 is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. A name may be registered between the check and purchase, or subject to registry/registrar restrictions. The project therefore labels all results for manual verification and never treats `UNKNOWN` as available.
+
+## Quality-first RDAP selection
+
+The default scheduled RDAP budget remains 50. The hunter first computes the existing score with neutral history for every locally acceptable candidate, then ranks candidates by initial score, shorter label length, commercial intent, keyword quality, brandability plus end-user potential, and domain name as a deterministic tie-breaker. The first 50 in that quality ranking consume RDAP requests; source-file order is not used to choose the budget. Candidates outside the budget remain deferred rather than being represented as available or rejected.
 
 ## Duplicate protection
 

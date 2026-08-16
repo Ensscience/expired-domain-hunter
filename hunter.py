@@ -19,11 +19,10 @@ from config import (
     DEFAULT_STATE_PATH,
     DEFAULT_TOP_N,
     WAYBACK_MAX_REQUESTS,
-    classification,
 )
-from src.availability import AUCTION, AVAILABLE, PENDING, REGISTERED, UNKNOWN, AvailabilityResult, VerisignRdapChecker
+from src.availability import AUCTION, AVAILABLE, PENDING, REGISTERED, UNKNOWN, AvailabilityResult, VerisignRdapChecker, rdap_url
 from src.data_source import DomainCandidate, load_domains
-from src.filters import inspect_candidate
+from src.filters import FilterResult, inspect_candidate
 from src.history import HistorySignals, WaybackClient, wayback_url
 from src.scoring import Evaluation, evaluate
 from src.state import ProcessState
@@ -93,9 +92,35 @@ def _lifecycle_status(candidate: DomainCandidate) -> str:
     status = candidate.status.lower()
     if "pending" in status or "redemption" in status:
         return PENDING
-    if any(marker in status for marker in ("auction", "backorder", "bidding", "aftermarket", "buy now")):
+    if any(marker in status for marker in ("auction", "backorder", "bidding", "aftermarket", "buy now", "expiring", "pre-release", "prerelease")):
         return AUCTION
     return UNKNOWN
+
+
+def _neutral_history(domain: str) -> HistorySignals:
+    """Provide a no-network baseline for the initial ranking stage."""
+
+    return HistorySignals(
+        checked=False,
+        historical_quality=4.0,
+        previous_use="History deferred until after availability verification.",
+        wayback_url=wayback_url(domain),
+    )
+
+
+def _initial_rank_key(item: tuple[DomainCandidate, FilterResult, Evaluation]) -> tuple[int, int, int, int, int, str]:
+    candidate, _, evaluation = item
+    label_length = len(candidate.label)
+    # Initial score is primary; the component tie-breakers make the quality
+    # preference explicit and prevent source/file order from deciding RDAP use.
+    return (
+        -evaluation.score,
+        label_length,
+        -evaluation.commercial_intent,
+        -evaluation.keyword_quality,
+        -evaluation.brandability - evaluation.end_user_potential,
+        candidate.normalized_domain,
+    )
 
 
 def _evaluation_row(item: Evaluation) -> dict[str, object]:
@@ -117,7 +142,7 @@ def write_results(evaluations: list[Evaluation], output_dir: Path, summary: dict
         handle.write("HAND-REG .COM DOMAIN HUNTER — RANKED RESULTS\n")
         handle.write("Only AVAILABLE domains can become BUY CANDIDATE alerts. AI estimates require manual verification.\n\n")
         if not evaluations:
-            handle.write("No source candidates were processed in this run.\n")
+            handle.write("No RDAP-selected candidates were processed in this run.\n")
         else:
             for index, item in enumerate(evaluations[:DEFAULT_TOP_N], start=1):
                 handle.write(f"{index}. {item.domain} — {item.score}/100 — {item.classification}\n")
@@ -175,10 +200,15 @@ def run(
         "auction": 0,
         "unknown": 0,
         "quality_filtered": 0,
+        "initial_scored": 0,
+        "rdap_selected": 0,
+        "rdap_deferred": 0,
         "state_skipped": 0,
         "evaluated": 0,
     }
 
+    # Phase 1: cheap local filtering and neutral-history initial scoring.
+    initial_ranked: list[tuple[DomainCandidate, FilterResult, Evaluation]] = []
     for candidate in candidates:
         if state and state.was_sent(candidate.normalized_domain):
             stats["state_skipped"] += 1
@@ -188,7 +218,13 @@ def run(
         if candidate.status and lifecycle in {PENDING, AUCTION}:
             stats["lifecycle_filtered"] += 1
             stats[lifecycle.lower()] += 1
-            registration = AvailabilityResult(candidate.normalized_domain, lifecycle, datetime.now(timezone.utc).isoformat(), wayback_url(candidate.normalized_domain), reason="source lifecycle is excluded from hand registration")
+            registration = AvailabilityResult(
+                candidate.normalized_domain,
+                lifecycle,
+                datetime.now(timezone.utc).isoformat(),
+                rdap_url(candidate.normalized_domain),
+                reason="source lifecycle is excluded from hand registration",
+            )
             evaluations.append(_excluded_evaluation(candidate, registration, f"Excluded source lifecycle: {candidate.status}"))
             if state:
                 state.record(candidate.normalized_domain, lifecycle, registration.checked_at_utc, score=0, reason=registration.reason)
@@ -198,6 +234,36 @@ def run(
             stats["state_skipped"] += 1
             continue
 
+        filter_result = inspect_candidate(candidate)
+        if not filter_result.accepted or filter_result.spam_signal:
+            stats["quality_filtered"] += 1
+            registration = AvailabilityResult(
+                candidate.normalized_domain,
+                UNKNOWN,
+                datetime.now(timezone.utc).isoformat(),
+                rdap_url(candidate.normalized_domain),
+                reason="basic local quality/spam filter; RDAP not attempted",
+            )
+            if state:
+                state.record(candidate.normalized_domain, UNKNOWN, registration.checked_at_utc, score=0, reason=registration.reason)
+            continue
+
+        initial = evaluate(candidate, filter_result, _neutral_history(candidate.normalized_domain))
+        initial.status = candidate.status
+        initial.registration_status = UNKNOWN
+        initial.source_count = _source_count(candidate)
+        initial.sources = _sources(candidate)
+        initial.score_stage = "INITIAL"
+        initial_ranked.append((candidate, filter_result, initial))
+        stats["initial_scored"] += 1
+
+    initial_ranked.sort(key=_initial_rank_key)
+    selected = initial_ranked[: max(0, max_availability)]
+    stats["rdap_selected"] = len(selected)
+    stats["rdap_deferred"] = max(0, len(initial_ranked) - len(selected))
+
+    # Phase 2: only the strongest initial candidates consume RDAP.
+    for candidate, filter_result, initial in selected:
         registration = checker.check(candidate.normalized_domain)
         stats["availability_checked"] += 1
         key = registration.registration_status.lower()
@@ -206,19 +272,18 @@ def run(
         if registration.registration_status != AVAILABLE:
             evaluations.append(_excluded_evaluation(candidate, registration, f"Not eligible for hand registration: {registration.registration_status}. {registration.reason}"))
             if state:
-                state.record(candidate.normalized_domain, registration.registration_status, registration.checked_at_utc, score=0, reason=registration.reason)
+                state.record(candidate.normalized_domain, registration.registration_status, registration.checked_at_utc, score=initial.score, reason=registration.reason)
             continue
 
-        filter_result = inspect_candidate(candidate)
-        if not filter_result.accepted:
-            stats["quality_filtered"] += 1
-            evaluations.append(_excluded_evaluation(candidate, registration, "Available but rejected by quality/safety filters: " + "; ".join(filter_result.reasons or []), "high" if filter_result.spam_signal else "medium" if filter_result.trademark_risk else "low"))
-            if state:
-                state.record(candidate.normalized_domain, AVAILABLE, registration.checked_at_utc, score=0, reason="quality filter")
-            continue
-
+        # Phase 3: only AVAILABLE candidates consume Wayback/history budget and
+        # receive the final score used for BUY CANDIDATE and Telegram decisions.
         if skip_wayback:
-            history = HistorySignals(checked=False, wayback_url=wayback_url(candidate.normalized_domain), previous_use="Wayback check skipped for this run.")
+            history = HistorySignals(
+                checked=False,
+                historical_quality=4.0,
+                wayback_url=wayback_url(candidate.normalized_domain),
+                previous_use="Wayback check skipped for this run.",
+            )
         else:
             history = history_client.inspect(candidate.normalized_domain)
         item = evaluate(candidate, filter_result, history)
@@ -226,6 +291,7 @@ def run(
         item.registration_status = AVAILABLE
         item.source_count = _source_count(candidate)
         item.sources = _sources(candidate)
+        item.score_stage = "FINAL"
         evaluations.append(item)
         stats["evaluated"] += 1
         if state:
@@ -235,13 +301,16 @@ def run(
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "total_input_candidates": len(candidates),
-        "total_output_rows": len(evaluations),
+        "initial_scored_candidates": stats["initial_scored"],
+        "rdap_selected_candidates": stats["rdap_selected"],
+        "rdap_deferred_candidates": stats["rdap_deferred"],
         "availability_requests_made": checker.requests_made,
         "wayback_requests_made": history_client.requests_made,
         "status_counts": {key: stats[key] for key in ("available", "registered", "pending", "auction", "unknown")},
         "buy_candidates": sum(item.registration_status == AVAILABLE and item.score >= 80 for item in evaluations),
         "watch_candidates": sum(item.registration_status == AVAILABLE and 65 <= item.score < 80 for item in evaluations),
         "ignore_candidates": sum(item.classification == "IGNORE" for item in evaluations),
+        "selection_strategy": "Initial score descending, then short label, commercial intent, keyword quality, brandability plus end-user potential, then domain name.",
         "scoring_note": "AI estimate — manual verification required.",
     }
     write_results(evaluations, output_dir, summary)
@@ -295,8 +364,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Input/output error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Processed {stats['input_rows']} unique valid .COM rows; available {stats['available']}; registered {stats['registered']}; pending {stats['pending']}; auction {stats['auction']}; unknown {stats['unknown']}.")
-    print(f"Quality-filtered {stats['quality_filtered']}; lifecycle-filtered {stats['lifecycle_filtered']}; state-skipped {stats['state_skipped']}.")
+    print(f"Processed {stats['input_rows']} unique valid .COM rows; initially scored {stats['initial_scored']}; RDAP-selected {stats['rdap_selected']}; deferred {stats['rdap_deferred']}.")
+    print(f"Availability results — available {stats['available']}; registered {stats['registered']}; pending {stats['pending']}; auction {stats['auction']}; unknown {stats['unknown']}.")
+    print(f"Basic-quality filtered {stats['quality_filtered']}; lifecycle-filtered {stats['lifecycle_filtered']}; state-skipped {stats['state_skipped']}.")
     print(f"Availability requests made: {stats['availability_requests']}; Wayback requests made: {stats['wayback_requests']}.")
     print(f"Results written to {args.output / 'results.csv'} and {args.output / 'top_domains.txt'}.")
     if rejected:

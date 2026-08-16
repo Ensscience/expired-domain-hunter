@@ -99,6 +99,7 @@ class Evaluation:
     registration_status: str = "UNKNOWN"
     source_count: int = 1
     sources: str = ""
+    score_stage: str = "FINAL"
 
 
 def _label(candidate: DomainCandidate) -> str:

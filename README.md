@@ -25,7 +25,7 @@ The Wayback history step uses the public CDX endpoint only for shortlisted candi
 | `src/data_source.py` | CSV import, column aliases, normalization, and invalid-row handling |
 | `src/filters.py` | `.COM` filtering, active-status rejection, prohibited-term and spam signals |
 | `src/history.py` | Bounded Wayback CDX checks and historical-use signals |
-| `src/scoring.py` | Transparent scoring, end-user categories, and conservative estimates |
+| `src/scoring.py` | Transparent initial/final scoring, end-user categories, and conservative estimates |
 | `src/telegram.py` | One daily summary and an explicit integration-test message |
 | `input/domains.csv` | Normalized automatic collector output or manual CSV fallback |
 | `output/collection_summary.json` | Feed counts, `.COM` counts, duplicates, errors, and fallback status |
@@ -41,13 +41,13 @@ The WhoisFreaks files are newline-delimited and described by their publisher as 
 
 The runtime pipeline is intentionally ordered as follows:
 
-> Public expired/dropped sources → expired/dropped-only lifecycle filter → `.COM` filter → deduplication → current availability check → AVAILABLE-only quality filters → Wayback/history → scoring → BUY CANDIDATE → Telegram.
+> Public expired/dropped sources → expired/dropped-only lifecycle filter → `.COM` filter → deduplication → cheap local quality/spam filters → neutral-history initial scoring → strongest-candidate selection → current availability check → AVAILABLE-only Wayback/history → final scoring → BUY CANDIDATE → Telegram.
 
-The collector rejects records labeled pending, pending delete, auction, backorder, expiring, pre-release, bidding, buy now, or aftermarket. The current availability checker then queries Verisign’s official `.COM` RDAP endpoint, [`https://rdap.verisign.com/com/v1/domain/<domain>`](https://www.verisign.com/news-insights/registration-data-access-protocol/help/). A valid RDAP domain object is `REGISTERED`, a valid authoritative RDAP 404 error object is `AVAILABLE`, RDAP lifecycle/hold signals are `PENDING`, source lifecycle markers are `AUCTION`, and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. Only `AVAILABLE` can become a BUY CANDIDATE or Telegram alert.
+The collector rejects records labeled pending, pending delete, auction, backorder, expiring, pre-release, bidding, buy now, or aftermarket. The hunter then applies cheap local quality and spam filters and calculates an initial score using the existing scoring model with neutral history. Candidates are ranked by initial score, short label length, commercial intent, keyword quality, brandability, end-user potential, and domain name as a deterministic tie-breaker. Only the top candidates up to the configured RDAP budget are queried. The availability checker queries Verisign’s official `.COM` RDAP endpoint, [`https://rdap.verisign.com/com/v1/domain/<domain>`](https://www.verisign.com/news-insights/registration-data-access-protocol/help/). A valid RDAP domain object is `REGISTERED`, a valid authoritative RDAP 404 error object is `AVAILABLE`, RDAP lifecycle/hold signals are `PENDING`, source lifecycle markers are `AUCTION`, and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. Only `AVAILABLE` candidates consume the more expensive Wayback/history budget, receive a final score, or become BUY CANDIDATE/Telegram alerts.
 
 RDAP availability is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. Names can be registered between the check and registration, and registry-reserved or registrar-specific restrictions may exist. Therefore every output and alert is labeled for manual verification, and `UNKNOWN` is never sent as a candidate.
 
-The workflow runs three times per day at **08:00 UTC**, **14:00 UTC**, and **20:00 UTC**, and also supports manual `workflow_dispatch`. `.state/processed_domains.json` is persisted through the GitHub Actions cache. Sent domains are never alerted again; registered, filtered, and other recently processed domains are cooled down, while UNKNOWN and unsent qualifying AVAILABLE domains can be rechecked later.
+The workflow runs three times per day at **08:00 UTC**, **14:00 UTC**, and **20:00 UTC**, and also supports manual `workflow_dispatch`. `.state/processed_domains.json` is persisted through the GitHub Actions cache. Sent domains are never alerted again; registered, filtered, and other recently processed domains are cooled down, while UNKNOWN and unsent qualifying AVAILABLE domains can be rechecked later. The scheduled RDAP budget remains 50, but those 50 are selected by the quality-first ranking rather than by input-file order.
 
 ## Installation and local execution
 
