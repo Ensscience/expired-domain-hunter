@@ -1,51 +1,62 @@
-# Automatic expired-domain data sources
+# Automatic expired-domain sources and hand-registration verification
 
-## Selected source
+## Sources actually used
 
-The collector uses the public [WhoisFreaks daily expired-and-dropped-domains GitHub repository](https://github.com/WhoisFreaks/daily-expired-and-dropped-domains). It downloads these two raw files directly:
+The collector uses three public raw feeds:
 
-- [Latest free expired domains](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv)
-- [Latest free dropped domains](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-dropped-domains.csv)
+| Feed | Lifecycle | Format | Role |
+|---|---|---|---|
+| [WhoisFreaks latest free expired list](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv) | Expired | One domain per line | Primary fresh feed |
+| [WhoisFreaks latest free dropped list](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-dropped-domains.csv) | Dropped | One domain per line | Primary fresh feed |
+| [UniqueDomains expired extract](https://raw.githubusercontent.com/UniqueDomains/expired-oneword-domains/main/expired.csv) | Expired | CSV with `domain` and `status` | Secondary public extract |
 
-The repository README describes separate expired and dropped feeds, daily updates, public machine-readable access, a free 10,000-domain-per-file subset, a stated one-day delay, partial gTLD coverage, and no ccTLD coverage in the free feed. The raw files observed on 2026-08-16 were newline-delimited domain names rather than CSV files with headers. The collector normalizes them into the existing `domain,status,source` schema.
+The two WhoisFreaks files are described by their public repository as daily free subsets. The UniqueDomains repository describes its file as a daily public extract of expired one-word domains, but only 1,000 rows rather than its larger live catalog. All three files are downloaded through ordinary public HTTPS GET requests with a descriptive User-Agent. No login, CAPTCHA, interactive scraping, anti-bot bypass, or paid API is used.
 
-This source was selected because it has the strongest combination of freshness, public direct download, machine-readable format, no login requirement, no CAPTCHA step, and no need to scrape an interactive marketplace. The workflow makes one request per feed per run, which is modest for a once-daily schedule.
+The collector preserves source provenance through `source`, `source_count`, and `sources` fields. If the same `.COM` domain appears in more than one source, it is deduplicated and the source list is retained.
 
-## Live measurement at implementation time
+## Explicitly excluded inventory
 
-The two raw files were downloaded successfully on 2026-08-16.
+The collector and hunter reject any record whose lifecycle label contains pending, pending delete, redemption, auction, backorder, expiring, pre-release, prerelease, bidding, buy now, or aftermarket markers. The pipeline does not treat a pending-delete list as an expired/dropped hand-registration feed. ExpiredDomains.net and Instant Domain Search are not scraped because their reviewed public surfaces are interactive and do not expose a documented public raw API/feed suitable for unattended use.
 
-| Measurement | Expired feed | Dropped feed | Combined before deduplication |
-|---|---:|---:|---:|
-| Raw lines | 10,000 | 10,000 | 20,000 |
-| Valid `.COM` lines | 5,139 | 4,507 | 9,646 |
+## ExpiredDomains.net assessment
 
-The combined `.COM` count is not necessarily the final unique count because a domain can appear in both feeds. The collector reports both per-feed counts and the deduplicated count in `output/collection_summary.json` on every run.
+The official [ExpiredDomains.net FAQ](https://www.expireddomains.net/faq/) says that the site has no API. Its [availability explanation](https://www.expireddomains.net/article/how-the-domain-availability-check-works-15107.html) says that bulk DNS checks are not reliable proof of registration availability and that WHOIS/RDAP or registrar checks are more reliable. Accordingly, ExpiredDomains.net remains a documented manual research option, but it is not an automated runtime source unless the operator obtains an explicitly permitted public export/API endpoint in the future.
 
-## Alternatives considered
+## Current availability verification
 
-| Source | Observed capability | Decision |
-|---|---|---|
-| WhoisFreaks public GitHub feed | Direct raw files, separate expired/dropped lists, daily public snapshots, no login for download | **Selected** |
-| [ExpiredDomains.net](https://www.expireddomains.net/) | Large interactive research site with filters and visible `.com` pending-delete lists; no clearly documented public raw feed or API was found on the reviewed public page | Not used for unattended collection; avoid unapproved scraping |
-| [Expired-domains.com](https://www.expired-domains.com/) | Free interactive browsing and CSV export advertised, but the reviewed page describes account-based access for extended date ranges and larger exports and exposes no stable public raw-feed URL or documented API | Manual fallback only unless explicit feed/API permission is obtained |
+Before quality filtering, history checks, scoring, or alerting, every candidate is checked against Verisign’s authoritative `.COM` RDAP service:
 
-The project does not automate a source merely because a browser can display it. It avoids CAPTCHA, login restrictions, robots restrictions, anti-bot systems, rate-limit bypasses, and access-control workarounds.
+- Official Verisign RDAP help: [Registration Data Access Protocol Help](https://www.verisign.com/news-insights/registration-data-access-protocol/help/)
+- IANA registry mapping: [Bootstrap Service Registry for Domain Name Space](https://www.iana.org/assignments/rdap-dns/rdap-dns.xhtml)
+- `.COM` base URL: `https://rdap.verisign.com/com/v1/`
+- Domain lookup: `https://rdap.verisign.com/com/v1/domain/<domain>`
+
+The implementation uses these outcomes:
+
+| Outcome | Meaning | Can alert? |
+|---|---|---:|
+| `AVAILABLE` | Valid Verisign RDAP 404 error object with no domain object | Yes, subject to score and deduplication |
+| `REGISTERED` | Valid RDAP domain object | No |
+| `PENDING` | Domain object contains pending/hold lifecycle indicators | No |
+| `AUCTION` | Source lifecycle indicates auction, bidding, backorder, or aftermarket | No |
+| `UNKNOWN` | Timeout, malformed response, rate limit, access restriction, server error, or other inconclusive response | No |
+
+An RDAP 404 is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. A name may be registered between the check and purchase, or subject to registry/registrar restrictions. The project therefore labels all results for manual verification and never treats `UNKNOWN` as available.
+
+## Duplicate protection
+
+`.state/processed_domains.json` is persisted through GitHub Actions cache. A domain marked sent is never alerted again. Recently processed registered, pending, auction, filtered, and other non-qualifying domains are cooled down. UNKNOWN results and unsent qualifying AVAILABLE results can be retried later so temporary RDAP or Telegram failures are not treated as permanent.
 
 ## Limitations
 
-The selected free feed is not a complete daily dump of all expired or dropped `.COM` domains. The publisher describes it as a partial free subset, with a stated one-day delay and incomplete TLD coverage. It does not provide the scoring engine’s optional SEO metrics, search volume, domain age, or referring-domain data in the raw files, so those fields are empty unless a later legitimate enrichment step supplies them. The hunter therefore relies primarily on name quality, commercial signals, and its bounded Wayback history checks for these automatically collected candidates.
-
-If both raw downloads fail, the collector does not simulate or invent domains. It preserves the existing checked-in `input/domains.csv` and marks `fallback_used: true` in `output/collection_summary.json`. If the fallback is absent or empty, the workflow fails clearly instead of pretending that automatic collection succeeded.
-
-## Compliance posture
-
-The collector uses ordinary HTTPS GET requests to public raw GitHub URLs with a descriptive User-Agent, a 30-second timeout, and two retries. It runs at most once per feed per workflow run. It does not access authenticated pages, submit forms, defeat CAPTCHAs, bypass robots or rate limits, or scrape the interactive pages of marketplace sites.
+The WhoisFreaks free feeds are partial subsets and are not a complete registry-wide list of all expired or dropped `.COM` domains. The UniqueDomains feed is only a 1,000-row one-word extract. These sources do not supply a complete guarantee of current hand-registerability, which is why the independent Verisign RDAP check is mandatory. The pipeline favors correctness and compliance over pretending to provide complete market coverage.
 
 ## References
 
-1. [WhoisFreaks daily expired-and-dropped-domains repository](https://github.com/WhoisFreaks/daily-expired-and-dropped-domains)
-2. [WhoisFreaks free expired-domain raw feed](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv)
-3. [WhoisFreaks free dropped-domain raw feed](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-dropped-domains.csv)
-4. [ExpiredDomains.net](https://www.expireddomains.net/)
-5. [Expired-domains.com](https://www.expired-domains.com/)
+1. [WhoisFreaks daily expired and dropped domains](https://github.com/WhoisFreaks/daily-expired-and-dropped-domains)
+2. [UniqueDomains expired one-word domains](https://github.com/UniqueDomains/expired-oneword-domains)
+3. [Verisign RDAP documentation](https://www.verisign.com/news-insights/registration-data-access-protocol/help/)
+4. [IANA RDAP DNS bootstrap registry](https://www.iana.org/assignments/rdap-dns/rdap-dns.xhtml)
+5. [ExpiredDomains.net FAQ](https://www.expireddomains.net/faq/)
+6. [ExpiredDomains.net availability-check explanation](https://www.expireddomains.net/article/how-the-domain-availability-check-works-15107.html)
+7. [Instant Domain Search expired domains](https://instantdomainsearch.com/expired-domains)

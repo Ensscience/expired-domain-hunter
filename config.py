@@ -47,6 +47,13 @@ WAYBACK_MAX_REQUESTS = int(os.getenv("WAYBACK_MAX_REQUESTS", "25"))
 WAYBACK_RETRIES = int(os.getenv("WAYBACK_RETRIES", "2"))
 WAYBACK_USER_AGENT = "expired-domain-hunter/1.0 (+https://github.com/Ensscience/expired-domain-hunter)"
 
+# Registration status must be verified before a candidate can be scored as a
+# BUY CANDIDATE. The hosted workflow overrides these to a conservative budget.
+AVAILABILITY_MAX_REQUESTS = int(os.getenv("AVAILABILITY_MAX_REQUESTS", "100"))
+AVAILABILITY_TIMEOUT_SECONDS = float(os.getenv("AVAILABILITY_TIMEOUT_SECONDS", "5"))
+AVAILABILITY_RETRIES = int(os.getenv("AVAILABILITY_RETRIES", "0"))
+DEFAULT_STATE_PATH = BASE_DIR / ".state" / "processed_domains.json"
+
 # Valuation is an AI-assisted heuristic, not a promise of sale price.
 BID_VALUE_RATIO = 0.02
 MIN_MAX_BID = 5.0

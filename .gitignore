@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+.state/
+docs/research_latest.md
 output/results.csv
 output/top_domains.txt
 output/run_summary.json

@@ -11,16 +11,25 @@ from config import TELEGRAM_MAX_ITEMS
 from src.scoring import Evaluation
 
 
+def _qualifying(evaluations: Iterable[Evaluation]) -> list[Evaluation]:
+    return [
+        item for item in evaluations
+        if item.score >= 80 and getattr(item, "registration_status", "UNKNOWN") == "AVAILABLE"
+    ]
+
+
 def _summary_message(evaluations: Iterable[Evaluation]) -> str:
-    qualifying = [item for item in evaluations if item.score >= 80][:TELEGRAM_MAX_ITEMS]
-    lines = ["EXPIRED .COM DOMAIN HUNTER", "", "Top opportunities today:"]
+    qualifying = _qualifying(evaluations)[:TELEGRAM_MAX_ITEMS]
+    lines = ["🔥 HAND-REG .COM OPPORTUNITIES", "", "Available for normal registration:"]
     for index, item in enumerate(qualifying, start=1):
         lines.extend(
             [
                 "",
                 f"{index}. {item.domain}",
                 f"   Score: {item.score}/100",
-                f"   Max bid: {item.suggested_max_bid}",
+                f"   Status: {getattr(item, 'registration_status', 'UNKNOWN')}",
+                "   Registration: HAND REG",
+                "   Suggested registration price: normal registrar registration",
                 f"   Estimated resale: {item.estimated_resale_range}",
                 f"   Why: {item.reason}",
             ]
@@ -41,7 +50,7 @@ def send_daily_summary(
     message is safe to print and never contains token or chat-id values.
     """
 
-    qualifying = [item for item in evaluations if item.score >= 80]
+    qualifying = _qualifying(evaluations)
     if not qualifying:
         return False, "No qualifying domains; Telegram summary not sent."
     bot_token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN", "")

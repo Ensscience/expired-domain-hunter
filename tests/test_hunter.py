@@ -75,6 +75,10 @@ def sample_evaluation(score: int = 91) -> Evaluation:
         reason="Short commercial keyword; AI estimate — manual verification required",
         wayback_url="https://web.archive.org/web/*/smartinvoices.com",
         source="test",
+        status="expired",
+        registration_status="AVAILABLE",
+        source_count=1,
+        sources="test",
     )
 
 
@@ -159,7 +163,7 @@ class HunterTests(unittest.TestCase):
             session=session,
         )
         self.assertTrue(sent)
-        self.assertIn("Top opportunities today", session.payload[1]["text"])
+        self.assertIn("HAND-REG .COM OPPORTUNITIES", session.payload[1]["text"])
         self.assertEqual(session.payload[1]["text"].count("smartinvoices.com"), 1)
         self.assertEqual(message, "Telegram daily summary sent.")
         skipped, skipped_message = send_daily_summary([sample_evaluation(70)], bot_token="test-token", chat_id="test-chat", session=session)

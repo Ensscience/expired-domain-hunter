@@ -52,6 +52,17 @@ TRADEMARK_RISK_TERMS = {
 }
 
 ACTIVE_STATUS_TERMS = {"active", "registered", "live", "reserved"}
+EXCLUDED_STATUS_MARKERS = {
+    "pending",
+    "auction",
+    "backorder",
+    "expiring",
+    "pre-release",
+    "prerelease",
+    "buy now",
+    "aftermarket",
+    "bidding",
+}
 TOKEN_RE = re.compile(r"[a-z]+|[0-9]+", re.IGNORECASE)
 VOWELS = set("aeiou")
 
@@ -120,9 +131,10 @@ def inspect_candidate(candidate: DomainCandidate) -> FilterResult:
     spam_signal = repeated_chars or too_many_digits or excessive_separators or label.startswith("xn--")
     awkward_spelling = consonant_run or repeated_chars or (len(label) >= 14 and not any(v in label for v in VOWELS))
     accepted = not prohibited_term and candidate.normalized_domain.endswith(".com")
-    if candidate.status in ACTIVE_STATUS_TERMS:
+    status = candidate.status.strip().lower()
+    if status in ACTIVE_STATUS_TERMS or any(marker in status for marker in EXCLUDED_STATUS_MARKERS):
         accepted = False
-        reasons.append(f"status is not expired/dropped: {candidate.status}")
+        reasons.append(f"status is not hand-registerable expired/dropped inventory: {candidate.status}")
 
     return FilterResult(
         accepted=accepted,

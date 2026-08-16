@@ -95,6 +95,10 @@ class Evaluation:
     reason: str
     wayback_url: str
     source: str
+    status: str = ""
+    registration_status: str = "UNKNOWN"
+    source_count: int = 1
+    sources: str = ""
 
 
 def _label(candidate: DomainCandidate) -> str:
