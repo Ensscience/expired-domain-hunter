@@ -50,9 +50,13 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WAYBACK_MAX_REQUESTS: "5"
+          WAYBACK_TIMEOUT_SECONDS: "8"
+          WAYBACK_RETRIES: "1"
         run: >-
           python hunter.py
           ${{ inputs.skip_wayback == true && '--skip-wayback' || '' }}
+          --max-wayback 5
           --send-telegram
 
       - name: Upload hunter results
