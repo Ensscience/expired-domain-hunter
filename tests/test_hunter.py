@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import csv
+import tempfile
+import unittest
+from pathlib import Path
+
+from hunter import RESULT_COLUMNS, run, write_results
+from src.data_source import DomainCandidate, load_domains, parse_rows
+from src.filters import inspect_candidate
+from src.history import HistorySignals, WaybackClient
+from src.scoring import Evaluation, evaluate
+from src.telegram import build_summary_for_test, send_daily_summary
+
+
+class FakeResponse:
+    status_code = 200
+    headers = {}
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return [
+            ["timestamp", "original", "statuscode", "mimetype", "digest"],
+            ["20120101000000", "http://smartinvoices.com/pricing", "200", "text/html", "a"],
+            ["20220101000000", "http://smartinvoices.com/product", "200", "text/html", "b"],
+        ]
+
+
+class FakeSession:
+    def __init__(self):
+        self.headers = {}
+        self.calls = []
+
+    def get(self, endpoint, params, timeout):
+        self.calls.append((endpoint, params, timeout))
+        return FakeResponse()
+
+
+class FakeTelegramResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"ok": True}
+
+
+class FakeTelegramSession:
+    def __init__(self):
+        self.payload = None
+
+    def post(self, endpoint, json, timeout):
+        self.payload = (endpoint, json, timeout)
+        return FakeTelegramResponse()
+
+
+def sample_evaluation(score: int = 91) -> Evaluation:
+    return Evaluation(
+        domain="smartinvoices.com",
+        score=score,
+        classification="BUY CANDIDATE" if score >= 80 else "WATCH",
+        suggested_max_bid="$20",
+        estimated_resale_range="$1,000-$3,000",
+        brandability=18,
+        commercial_intent=19,
+        keyword_quality=14,
+        length_readability=9,
+        historical_quality=9,
+        backlink_quality=7,
+        age_history=4,
+        end_user_potential=10,
+        spam_risk="low",
+        potential_industries="invoicing and accounts-receivable software",
+        reason="Short commercial keyword; AI estimate — manual verification required",
+        wayback_url="https://web.archive.org/web/*/smartinvoices.com",
+        source="test",
+    )
+
+
+class HunterTests(unittest.TestCase):
+    def test_com_filter_and_optional_columns(self):
+        candidates, rejected = parse_rows(
+            [
+                {"domain": "SmartInvoices.com", "keyword": "invoicing software"},
+                {"domain": "example.net", "keyword": "software"},
+                {"domain": "bad domain.com", "keyword": ""},
+            ]
+        )
+        self.assertEqual([candidate.domain for candidate in candidates], ["smartinvoices.com"])
+        self.assertEqual(len(rejected), 2)
+        self.assertIsNone(candidates[0].backlinks)
+
+    def test_spam_and_active_status_filtering(self):
+        spam = DomainCandidate(domain="x9x9-casino.com", status="expired")
+        active = DomainCandidate(domain="activeproduct.com", status="active")
+        self.assertFalse(inspect_candidate(spam).accepted)
+        active_result = inspect_candidate(active)
+        self.assertFalse(active_result.accepted)
+        self.assertTrue(active_result.reasons)
+
+    def test_wayback_history_parsing_is_bounded(self):
+        session = FakeSession()
+        client = WaybackClient(session=session, max_requests=1)
+        result = client.inspect("smartinvoices.com")
+        self.assertEqual(client.requests_made, 1)
+        self.assertEqual(result.snapshots, 2)
+        self.assertEqual(result.first_year, 2012)
+        self.assertFalse(result.spam_like)
+        client.inspect("another.com")
+        self.assertEqual(client.requests_made, 1)
+
+    def test_score_and_conservative_valuation(self):
+        candidate = DomainCandidate(
+            domain="smartinvoices.com",
+            status="dropped",
+            backlinks=420,
+            ref_domains=58,
+            domain_age=12,
+            archive_year=2012,
+            keyword="invoicing software",
+            search_volume=5400,
+        )
+        filters = inspect_candidate(candidate)
+        history = HistorySignals(
+            checked=True,
+            snapshots=2,
+            first_year=2012,
+            last_year=2022,
+            historical_quality=9,
+            previous_use="Historical URL signals include commercial themes: pricing, product.",
+            wayback_url="https://web.archive.org/web/*/smartinvoices.com",
+        )
+        result = evaluate(candidate, filters, history)
+        self.assertGreaterEqual(result.score, 65)
+        self.assertIn(result.classification, {"WATCH", "BUY CANDIDATE"})
+        self.assertTrue(result.suggested_max_bid.startswith("$"))
+        self.assertIn("manual verification", result.reason)
+        self.assertLessEqual(float(result.suggested_max_bid.replace("$", "").replace(",", "")), 250)
+
+    def test_empty_dataset_and_output_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            empty = root / "empty.csv"
+            empty.write_text("domain,keyword\n", encoding="utf-8")
+            evaluations, stats, rejected = run(empty, root / "output", skip_wayback=True)
+            self.assertEqual(evaluations, [])
+            self.assertEqual(stats["evaluated"], 0)
+            self.assertEqual(rejected, [])
+            with (root / "output" / "results.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertEqual(next(csv.reader(handle)), RESULT_COLUMNS)
+
+    def test_telegram_only_sends_one_summary_for_qualifying_domains(self):
+        session = FakeTelegramSession()
+        sent, message = send_daily_summary(
+            [sample_evaluation(91), sample_evaluation(70)],
+            bot_token="test-token",
+            chat_id="test-chat",
+            session=session,
+        )
+        self.assertTrue(sent)
+        self.assertIn("Top opportunities today", session.payload[1]["text"])
+        self.assertEqual(session.payload[1]["text"].count("smartinvoices.com"), 1)
+        self.assertEqual(message, "Telegram daily summary sent.")
+        skipped, skipped_message = send_daily_summary([sample_evaluation(70)], bot_token="test-token", chat_id="test-chat", session=session)
+        self.assertFalse(skipped)
+        self.assertIn("not sent", skipped_message)
+
+    def test_summary_contains_manual_verification_label(self):
+        self.assertIn("manual verification required", build_summary_for_test([sample_evaluation()]))
+
+
+if __name__ == "__main__":
+    unittest.main()
