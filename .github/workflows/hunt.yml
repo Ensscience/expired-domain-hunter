@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
+      - name: Collect latest public expired and dropped domains
+        run: python collector.py --output input/domains.csv --summary output/collection_summary.json --fallback input/domains.csv
+
       - name: Run Telegram integration test when requested
         if: ${{ inputs.telegram_test == true }}
         env:

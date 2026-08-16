@@ -5,3 +5,4 @@ __pycache__/
 output/results.csv
 output/top_domains.txt
 output/run_summary.json
+output/collection_summary.json
