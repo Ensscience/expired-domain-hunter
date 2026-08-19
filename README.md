@@ -1,6 +1,6 @@
 # Expired Domain Hunter
 
-Expired Domain Hunter is a standalone Python utility for automatically collecting, filtering, scoring, ranking, and reporting the **TOP 50 `.COM` domains from a public expired-source feed**. Availability is a separate RDAP-enriched property: `AVAILABLE`, `REGISTERED`, `PENDING`, `AUCTION`, and `UNKNOWN` are all explicitly labeled, and `UNKNOWN` domains may remain in the TOP 50. The scheduled pipeline uses only the public WhoisFreaks expired feed; a user-provided CSV remains an explicit local fallback, not a scheduled fallback.
+Expired Domain Hunter is a standalone Python utility for automatically collecting, filtering, scoring, ranking, and reporting the **TOP 50 currently AVAILABLE, hand-registerable, high-quality `.COM` domains from a public expired-source feed**. The final report contains only `AVAILABLE` domains scoring at least **7.0/10**; `REGISTERED`, `PENDING`, `AUCTION`, and `UNKNOWN` domains are never placed in the final list. The scheduled pipeline uses only the public WhoisFreaks expired feed; a user-provided CSV remains an explicit local fallback, not a scheduled fallback.
 
 The project runs independently through GitHub Actions. Manus is not part of the runtime, and the application does not use a Manus API, Manus account, Manus credential, paid API, paid server, paid database, or paid hosting service.
 
@@ -8,9 +8,9 @@ The project runs independently through GitHub Actions. Manus is not part of the 
 
 ## What the system does
 
-On each scheduled run, the collector downloads only the public WhoisFreaks expired feed, admits only valid `.COM` rows from that feed, and writes a normalized `input/domains.csv`. Dropped, UniqueDomains, pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, buy-now, and aftermarket inventory is not admitted to the main dataset. The hunter then applies the existing cheap local quality/spam filters, transparent 100-point score, deterministic ranking, TOP 50 selection, bounded RDAP enrichment, and appropriate Wayback checks. It writes `output/results.csv`, `output/top_domains.txt`, `output/source_report.csv`, and JSON summaries. One consolidated TOP 50 Telegram report is sent only when the dataset fingerprint is genuinely new.
+On each scheduled run, the collector downloads only the public WhoisFreaks expired feed, admits only valid `.COM` rows from that feed, and writes a normalized `input/domains.csv`. Dropped, UniqueDomains, pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, buy-now, marketplace, hold, reserved, and aftermarket inventory is not admitted to the main dataset. The hunter applies cheap local quality filters and the strict investor-oriented 0–10 score, ranks the strongest initial candidates for bounded RDAP checks, rejects every non-AVAILABLE result, runs Wayback/history only for AVAILABLE domains, calculates final scores, and emits fewer than 50 results when fewer than 50 satisfy the final threshold. One consolidated AVAILABLE-only Telegram report or a truthful zero-result message is sent only when the dataset fingerprint is genuinely new.
 
-The Wayback history step uses the public CDX endpoint only for shortlisted candidates, applies a request budget, uses timeouts and retries, and does not attempt to bypass CAPTCHAs, logins, anti-bot controls, rate limits, or access restrictions. The public CDX interface and archive browsing are documented by the Internet Archive [Wayback CDX Server project](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server) and [Wayback Machine](https://web.archive.org/).
+The Wayback history step uses the public CDX endpoint only after Verisign RDAP has confirmed a candidate AVAILABLE, applies a request budget, uses timeouts and retries, and does not attempt to bypass CAPTCHAs, logins, anti-bot controls, rate limits, or access restrictions. The public CDX interface and archive browsing are documented by the Internet Archive [Wayback CDX Server project](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server) and [Wayback Machine](https://web.archive.org/).
 
 ## Architecture
 
@@ -25,12 +25,12 @@ The Wayback history step uses the public CDX endpoint only for shortlisted candi
 | `src/data_source.py` | CSV import, column aliases, normalization, and invalid-row handling |
 | `src/filters.py` | `.COM` filtering, active-status rejection, prohibited-term and spam signals |
 | `src/history.py` | Bounded Wayback CDX checks and historical-use signals |
-| `src/scoring.py` | Transparent initial/final scoring, end-user categories, and conservative estimates |
+| `src/scoring.py` | Strict 0–10 investor score, component explanations, penalties, and conservative estimates |
 | `src/telegram.py` | Consolidated TOP 50 dataset reports, safe message splitting, and integration-test message |
 | `input/domains.csv` | Normalized automatic collector output or manual CSV fallback |
 | `output/collection_summary.json` | Feed counts, dataset ID/date, hashes, duplicates, errors, and fallback status |
 | `output/source_report.csv` | Per-source metadata, ETag, Last-Modified, date, hash, and counts |
-| `output/results.csv` | Machine-readable ranked TOP 50 with availability status |
+| `output/results.csv` | Machine-readable final AVAILABLE-only candidates with availability status |
 | `output/top_domains.txt` | Human-readable TOP 50 report |
 | `.github/workflows/hunt.yml` | Daily and manual GitHub Actions execution |
 
@@ -42,11 +42,11 @@ The selected WhoisFreaks file is newline-delimited and described by its publishe
 
 The runtime pipeline is intentionally ordered as follows:
 
-> Public expired-only source → dataset fingerprint → expired-only lifecycle filter → `.COM` filter → deduplication → cheap local quality/spam filters → existing initial scoring → rank all qualifying domains → select TOP 50 → RDAP enrichment → Wayback/history where appropriate → final score → Telegram.
+> Download → normalize → `.COM` filter → deduplicate → fail-closed lifecycle filter → quality filter → initial 0–10 score → strongest RDAP candidates → AVAILABLE only → Wayback/history → final 0–10 score → final ranking → Telegram.
 
-The collector admits only the selected expired feed and rejects any non-expired lifecycle input passed through explicit local/test arguments. Pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, buy now, and aftermarket records are never relabeled as expired. The hunter then applies cheap local quality and spam filters and calculates the existing 100-point score for every qualifying candidate with neutral history. Candidates are ranked by quality score, commercial intent, keyword quality, brandability, end-user potential, shorter length, and deterministic domain-name tie-breakers. The TOP 50 are selected by Hunter quality—not by RDAP status and not by input order. Verisign RDAP enriches those candidates only; a valid RDAP domain object is `REGISTERED`, a valid authoritative RDAP 404 error object is `AVAILABLE`, RDAP lifecycle/hold signals are `PENDING`, source lifecycle markers are `AUCTION`, and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. UNKNOWN domains remain eligible for the TOP 50 and are never described as available. AVAILABLE entries say: **AVAILABLE — verify at registrar before registration.**
+The collector admits only the selected expired feed and rejects any lifecycle input that cannot safely be interpreted as expired. Pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, marketplace, buy now, hold, reserved, and aftermarket records are never relabeled as expired. Initial scores are strict 0–10 investor scores. RDAP checks are spent on the strongest initial candidates rather than the first source rows. A valid authoritative Verisign 404 is `AVAILABLE`; a domain object is `REGISTERED` unless its lifecycle contains pending/hold markers, which become `PENDING`; auction markers become `AUCTION`; and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. Only AVAILABLE candidates continue to Wayback/history and final scoring. The final list is capped at 50 but may contain fewer than 50 or zero entries.
 
-RDAP availability is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. Names can be registered between the check and registration, and registry-reserved or registrar-specific restrictions may exist. Every output and Telegram report therefore states **QUALITY SCORE ≠ AVAILABILITY**, labels every entry, and keeps UNKNOWN separate from AVAILABLE.
+RDAP availability is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. Names can be registered between the check and registration, and registry-reserved or registrar-specific restrictions may exist. Every final output and Telegram report therefore contains only `AVAILABLE` entries and states that registrar verification is still required immediately before registration. Non-AVAILABLE statuses remain in run counts and diagnostics, never in the final candidate list.
 
 The workflow runs three times per day at **08:00 UTC**, **14:00 UTC**, and **20:00 UTC**, and also supports manual `workflow_dispatch`. `.state/processed_domains.json` is persisted through the GitHub Actions cache. Dataset fingerprints combine source identity, feed URL, content SHA-256, ETag, and Last-Modified metadata; a dataset already reported is not sent again. Scheduled runs therefore detect a new feed snapshot at the next poll, while manual runs can process it immediately.
 
@@ -75,7 +75,7 @@ For a run with an explicit request budget:
 python hunter.py --max-wayback 25
 ```
 
-The commands create `input/domains.csv`, `output/collection_summary.json`, `output/source_report.csv`, `output/results.csv`, `output/top_domains.txt`, and `output/run_summary.json`. An empty or missing fallback CSV is handled gracefully; the collector never fabricates domain records.
+The commands create `input/domains.csv`, `output/collection_summary.json`, `output/source_report.csv`, `output/results.csv`, `output/top_domains.txt`, and `output/run_summary.json`. An empty or missing fallback CSV is handled gracefully; the collector never fabricates domain records and the final report may correctly contain zero candidates.
 
 To run automatic collection locally:
 
@@ -120,34 +120,33 @@ Trademark detection is **not complete**. A possible trademark match is only a ri
 
 ## Scoring system
 
-The positive score is transparent and totals 100 points before penalties.
+The score is a strict **0–10 investor-oriented score**. It is not the previous 100-point score divided by ten.
 
-| Component | Maximum points |
+| Component | Maximum |
 |---|---:|
-| Brandability | 20 |
-| Commercial intent | 20 |
-| Keyword quality | 15 |
-| Length and readability | 10 |
-| Historical quality | 10 |
-| Backlink/referring-domain quality | 10 |
-| Age and history | 5 |
-| End-user potential | 10 |
-| **Total** | **100** |
+| Natural language / phrase quality | 2.0 |
+| Brandability | 2.0 |
+| Commercial / end-user demand | 2.0 |
+| Shortness / memorability | 1.0 |
+| Keyword quality | 1.0 |
+| Resale potential | 1.0 |
+| Broad clean market appeal | 1.0 |
+| **Total before penalties** | **10.0** |
 
-The system then applies bounded penalties for generic suffixes, keyword stuffing, awkward word combinations, invented strings, three-or-more-word structures, numbers, hyphens, suspicious history, spam signals, possible trademark risk, and weak specific commercial potential. Generic terms such as `tech`, `shop`, `pay`, `app`, `web`, `store`, `online`, and `digital` do not receive large positive credit by themselves. They help only when the complete name is a recognized, natural, memorable, commercially meaningful phrase.
+The model applies bounded penalties for random or unrecognized strings, invented names without brand strength, awkward English, keyword stuffing, long three-or-more-word structures, weak modifiers, narrow personal-name markets, spam, adult/gambling signals, confusing spelling, numbers, hyphens, trademark risk, and suspicious history. A valuable keyword alone cannot produce a high score.
 
 The classification thresholds are:
 
 | Score | Classification |
 |---:|---|
-| 90–100 | EXCEPTIONAL |
-| 80–89 | STRONG |
-| 70–79 | GOOD |
-| 60–69 | WATCH |
-| 50–59 | WEAK |
-| Below 50 | IGNORE |
+| 9.0–10.0 | EXCEPTIONAL |
+| 8.0–8.9 | STRONG |
+| 7.0–7.9 | GOOD |
+| 6.0–6.9 | DECENT |
+| 5.0–5.9 | WEAK |
+| 0–4.9 | IGNORE |
 
-The model gives its strongest name-quality credit to short recognized English words and selective natural two-word combinations. It uses the free `wordfreq` frequency data and `wordninja` compound segmentation to distinguish common words, legitimate uncommon commercial terms, clean pronounceable brands, and random fragments. Generalized adjective+noun, noun+noun, verb+noun, and commercial category+product patterns are accepted only when the complete phrase is understandable. Three-or-more-word names, unrecognized tokens, generic modifiers, awkward order, repeated generic terms, difficult spelling, and random/generated-looking strings are penalized. The scoring model is deliberately calibrated so a poor dataset can have no domains above 70; it does not force BUY CANDIDATE or STRONG classifications.
+The model gives strongest credit to short recognized English words and natural two-word combinations. It uses free `wordfreq` frequency data and `wordninja` compound segmentation to distinguish common words, valid uncommon terms, pronounceable brands, and random fragments. Ten-point scores are rare. The final Telegram threshold is **AVAILABLE plus score >= 7.0/10**; the system never lowers that threshold to fill 50 positions.
 
 End-user potential is strict and specific. The model records a plausible industry only when the actual recognized words and their combination establish a concrete market signal. It does not append generic technology, ecommerce, or business-service explanations to arbitrary names. Potential buyers and resale value remain hypotheses requiring manual research.
 
@@ -166,7 +165,7 @@ The workflow reads these GitHub Actions secrets and never hard-codes them:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-The Telegram Bot API is called only from the workflow or from an explicitly requested local command. For every genuinely new dataset, the system sends one consolidated **TOP 50 EXPIRED .COM** report, split into multiple Telegram messages only when the message-length limit requires it. Each entry includes its rank, score, classification, availability status, source provenance, specific reason, main strength, main weakness, and trademark-risk flag where relevant. The report explicitly states **QUALITY SCORE ≠ AVAILABILITY**. `AVAILABLE` means verify at a registrar before registration; `UNKNOWN` is never described as available. The API endpoint and message method follow the public [Telegram Bot API documentation](https://core.telegram.org/bots/api).
+The Telegram Bot API is called only from the workflow or from an explicitly requested local command. For every genuinely new dataset, the system sends one consolidated **TOP AVAILABLE EXPIRED .COM** report, split into multiple Telegram messages only when the message-length limit requires it. Every listed entry is `AVAILABLE` and scores at least 7.0/10. Each entry includes its rank, score, classification, source provenance, specific reason, main strength, main weakness, estimated resale range, and trademark-risk flag where relevant. If no entry qualifies, Telegram receives: **“🔎 No high-quality available expired .COM domains were verified in this dataset.”** followed by truthful quality/RDAP/status counts. Registrar verification remains required immediately before registration. The API endpoint and message method follow the public [Telegram Bot API documentation](https://core.telegram.org/bots/api).
 
 To test delivery manually from GitHub Actions, open the **Expired Domain Hunter** workflow, choose **Run workflow**, set **telegram_test** to `true`, and start it. This sends one clearly labeled integration-test message and then runs the normal hunt. The test option is opt-in and does not expose secrets in logs.
 
@@ -180,13 +179,13 @@ The workflow in `.github/workflows/hunt.yml`:
 4. Installs Python dependencies.
 5. Downloads and normalizes the latest public expired-only feed.
 6. Records ETag, Last-Modified, dataset date, content hashes, and source counts.
-7. Scores and ranks all locally qualifying domains, selects the TOP 50, and enriches those candidates with bounded RDAP/Wayback checks.
-8. Sends one TOP 50 Telegram report only when the dataset fingerprint is new.
+7. Quality-scores all local candidates, spends the configurable RDAP budget on the strongest initial candidates, keeps AVAILABLE only, then applies bounded Wayback/history and final scoring.
+8. Sends one AVAILABLE-only Telegram report or the zero-result message only when the dataset fingerprint is new.
 9. Uploads `output/` as a GitHub Actions artifact retained for 14 days.
 
 The workflow uses GitHub-hosted runners and the standard [GitHub Actions workflow syntax](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions). The application itself has no persistent database requirement. If historical state is needed later, the output artifact or a committed user-managed data file can be used without adding a paid service.
 
-To run it manually with the normal pipeline, select **Run workflow** and leave the optional inputs disabled. The collector obtains real public feed data, computes the dataset fingerprint, scores and ranks all qualifying domains, selects the TOP 50, and then performs bounded RDAP enrichment on those candidates. `skip_wayback` skips only history checks; it does not skip RDAP enrichment. `availability_budget` controls how many TOP 50 entries receive RDAP checks; it does not reduce the TOP 50 report itself. `reset_state` is reserved for explicit fresh verification and should not be used for normal scheduled operation.
+To run it manually with the normal pipeline, select **Run workflow** and leave the optional inputs disabled. The collector obtains real public feed data, computes the dataset fingerprint, quality-scores local candidates, sends the configured RDAP budget to the strongest candidates, rejects every non-AVAILABLE result, and only then performs bounded Wayback/history checks and final scoring. `skip_wayback` skips only history checks; it does not skip RDAP enrichment. `availability_budget` controls the number of strongest initial candidates checked by RDAP. `reset_state` is reserved for explicit fresh verification and should not be used for normal scheduled operation.
 
 ## Testing
 
@@ -196,7 +195,8 @@ The repository includes dependency-light unit tests using Python’s standard li
 python -m unittest discover -s tests -v
 ```
 
-The tests cover public-feed parsing, secondary-feed parsing, lifecycle exclusion, retry and failure handling, `.COM` filtering, deduplication, ETag/Last-Modified/hash metadata, RDAP AVAILABLE/REGISTERED/PENDING/UNKNOWN outcomes, TOP 50 selection without an RDAP hard gate, persistent domain and dataset state, invalid domains, prohibited and spam signals, active-status rejection, scoring, classification, conservative bid calculation, empty datasets, CSV output headers, bounded Wayback parsing, Telegram TOP 50 formatting and message splitting. A local automatic collection and hunt run is:
+The tests cover the expired-only public feed URL, dropped/UniqueDomains exclusion, lifecycle fail-closed behavior, retry and failure handling, `.COM` filtering, deduplication, ETag/Last-Modified/hash metadata, RDAP AVAILABLE/REGISTERED/PENDING/UNKNOWN outcomes, malformed/timeout/rate-limit handling, quality-ranked RDAP selection, AVAILABLE-only final ranking, 7.0 threshold enforcement, Wayback-after-availability ordering, persistent state and dataset fingerprints, invalid domains, prohibited and spam signals, 0–10 scoring bands, conservative bid calculation, empty and zero-result datasets, CSV output headers, bounded Wayback parsing, Telegram AVAILABLE-only formatting, zero-result messaging, and message splitting.
+ A local automatic collection and hunt run is:
 
 ```bash
 python collector.py

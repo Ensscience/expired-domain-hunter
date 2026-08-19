@@ -58,11 +58,11 @@ class FakeTelegramSession:
         return FakeTelegramResponse()
 
 
-def sample_evaluation(score: int = 91) -> Evaluation:
+def sample_evaluation(score: float = 8.5, status: str = "AVAILABLE") -> Evaluation:
     return Evaluation(
         domain="smartinvoices.com",
         score=score,
-        classification="BUY CANDIDATE" if score >= 80 else "WATCH",
+        classification=classification(score),
         suggested_max_bid="$20",
         estimated_resale_range="$1,000-$3,000",
         brandability=18,
@@ -105,7 +105,7 @@ class HunterTests(unittest.TestCase):
         active_result = inspect_candidate(active)
         self.assertFalse(active_result.accepted)
         self.assertTrue(active_result.reasons)
-        for status in ("dropped", "deleted", "redemption period", "pending delete", "auction"):
+        for status in ("dropped", "deleted", "redemption period", "pending delete", "auction", "hold", "reserved", "marketplace", "backorder"):
             lifecycle_result = inspect_candidate(DomainCandidate(domain="statuscheck.com", status=status))
             self.assertFalse(lifecycle_result.accepted, status)
 
@@ -142,52 +142,52 @@ class HunterTests(unittest.TestCase):
             wayback_url="https://web.archive.org/web/*/smartinvoices.com",
         )
         result = evaluate(candidate, filters, history)
-        self.assertGreaterEqual(result.score, 65)
-        self.assertIn(result.classification, {"EXCEPTIONAL", "STRONG", "GOOD", "WATCH", "WEAK", "IGNORE"})
+        self.assertGreaterEqual(result.score, 7.0)
+        self.assertIn(result.classification, {"EXCEPTIONAL", "STRONG", "GOOD", "DECENT", "WEAK", "IGNORE"})
         self.assertTrue(result.suggested_max_bid.startswith("$"))
         self.assertIn("manual verification", result.reason)
         self.assertLessEqual(float(result.suggested_max_bid.replace("$", "").replace(",", "")), 250)
 
     def test_investor_quality_regression_matrix(self):
         strong_one_word = evaluate(DomainCandidate(domain="balustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="balustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
-        self.assertGreaterEqual(strong_one_word.score, 60)
+        self.assertGreaterEqual(strong_one_word.score, 6.0)
         self.assertNotIn("unrecognized", strong_one_word.main_weakness)
 
         strong_two_word = evaluate(DomainCandidate(domain="cloudledger.com", status="expired"), inspect_candidate(DomainCandidate(domain="cloudledger.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
-        self.assertGreaterEqual(strong_two_word.score, 60)
+        self.assertGreaterEqual(strong_two_word.score, 8.0)
         self.assertIn("Natural two-word", strong_two_word.main_strength)
 
         natural_product = evaluate(DomainCandidate(domain="steelbalustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="steelbalustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
-        self.assertGreaterEqual(natural_product.score, 55)
+        self.assertGreaterEqual(natural_product.score, 7.0)
 
         uncommon_valid = evaluate(DomainCandidate(domain="balustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="balustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
         self.assertNotIn("unrecognized", uncommon_valid.main_weakness)
 
         brandable = evaluate(DomainCandidate(domain="securelium.com", status="expired"), inspect_candidate(DomainCandidate(domain="securelium.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
-        self.assertIn("coined", brandable.main_strength)
-        self.assertLess(brandable.score, 50)
+        self.assertIn("pronounceable brand", brandable.main_strength)
+        self.assertLess(brandable.score, 5.0)
 
         for domain in ("payacel.com", "paydoshop.com", "shopicontech.com", "qzxvptk.com", "paymentshealthcenter.com"):
             candidate = DomainCandidate(domain=domain, status="expired")
             result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
-            self.assertLess(result.score, 50, domain)
+            self.assertLess(result.score, 5.0, domain)
 
     def test_classification_bands_and_investor_examples(self):
-        self.assertEqual(classification(95), "EXCEPTIONAL")
-        self.assertEqual(classification(85), "STRONG")
-        self.assertEqual(classification(75), "GOOD")
-        self.assertEqual(classification(65), "WATCH")
-        self.assertEqual(classification(55), "WEAK")
-        self.assertEqual(classification(49), "IGNORE")
+        self.assertEqual(classification(9.5), "EXCEPTIONAL")
+        self.assertEqual(classification(8.5), "STRONG")
+        self.assertEqual(classification(7.5), "GOOD")
+        self.assertEqual(classification(6.5), "DECENT")
+        self.assertEqual(classification(5.5), "WEAK")
+        self.assertEqual(classification(4.9), "IGNORE")
         for domain in ("cloudpay.com", "fastmoney.com"):
             candidate = DomainCandidate(domain=domain, status="expired")
             result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
-            self.assertGreaterEqual(result.score, 55)
+            self.assertGreaterEqual(result.score, 5.0)
         for domain in ("vismaweb.com", "webullotc.com"):
             candidate = DomainCandidate(domain=domain, status="expired")
             result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
             self.assertIn("Trademark risk", result.trademark_risk_flag)
-            self.assertLess(result.score, 50)
+            self.assertLess(result.score, 5.0)
 
     def test_generic_suffix_regression_names_are_not_inflated(self):
         weak_names = ["paydoshop.com", "payupshop.com", "shopicontech.com", "datakudi.com", "ukrantech.com", "wojodtech.com", "yaorashop.com"]
@@ -196,9 +196,9 @@ class HunterTests(unittest.TestCase):
             candidate = DomainCandidate(domain=domain, status="expired")
             result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
             scores.append(result.score)
-            self.assertLess(result.score, 60, domain)
+            self.assertLess(result.score, 5.0, domain)
             self.assertIn(result.classification, {"WEAK", "IGNORE"})
-        self.assertLess(max(scores), 60)
+        self.assertLess(max(scores), 5.0)
 
     def test_empty_dataset_and_output_schema(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -221,18 +221,46 @@ class HunterTests(unittest.TestCase):
             session=session,
         )
         self.assertTrue(sent)
-        self.assertIn("TOP 50 EXPIRED .COM", session.payload[1]["text"])
-        self.assertIn("QUALITY SCORE ≠ AVAILABILITY", session.payload[1]["text"])
+        self.assertIn("TOP AVAILABLE EXPIRED .COM", session.payload[1]["text"])
+        self.assertIn("Score threshold: AVAILABLE + score >= 7.0/10", session.payload[1]["text"])
         self.assertEqual(session.payload[1]["text"].count("smartinvoices.com"), 2)
-        self.assertEqual(message, "Telegram TOP 50 report sent in 1 message(s).")
+        self.assertEqual(message, "Telegram AVAILABLE-only report sent in 1 message(s).")
         sent_empty, empty_message = send_daily_summary([], bot_token="test-token", chat_id="test-chat", session=session)
         self.assertTrue(sent_empty)
-        self.assertIn("TOP 50 EXPIRED .COM", session.payload[1]["text"])
-        self.assertEqual(empty_message, "Telegram TOP 50 report sent in 1 message(s).")
+        self.assertIn("TOP AVAILABLE EXPIRED .COM", session.payload[1]["text"])
+        self.assertEqual(empty_message, "Telegram AVAILABLE-only report sent in 1 message(s).")
+
+    def test_telegram_filters_non_available_and_below_threshold(self):
+        session = FakeTelegramSession()
+        available = sample_evaluation(7.5)
+        registered = sample_evaluation(9.9)
+        registered.domain = "registered.com"
+        registered.registration_status = "REGISTERED"
+        pending = sample_evaluation(9.8)
+        pending.domain = "pending.com"
+        pending.registration_status = "PENDING"
+        low = sample_evaluation(6.9)
+        low.domain = "low.com"
+        sent, message = send_daily_summary([available, registered, pending, low], bot_token="test-token", chat_id="test-chat", session=session, counts={"AVAILABLE": 1, "REGISTERED": 1, "PENDING": 1, "UNKNOWN": 0}, quality_candidates=4, rdap_checked=4)
+        self.assertTrue(sent)
+        self.assertIn("smartinvoices.com", "\\n".join(payload[1]["text"] for payload in session.payloads))
+        combined = "\\n".join(payload[1]["text"] for payload in session.payloads)
+        self.assertNotIn("registered.com", combined)
+        self.assertNotIn("pending.com", combined)
+        self.assertNotIn("low.com", combined)
+        self.assertIn("Score: 7.5/10", combined)
+        self.assertIn("Telegram AVAILABLE-only", message)
+        zero_session = FakeTelegramSession()
+        zero_sent, _ = send_daily_summary([], bot_token="test-token", chat_id="test-chat", session=zero_session, counts={"AVAILABLE": 0, "REGISTERED": 2, "PENDING": 3, "UNKNOWN": 4}, quality_candidates=9, rdap_checked=9)
+        self.assertTrue(zero_sent)
+        zero_text = zero_session.payloads[0][1]["text"]
+        self.assertIn("Final candidates: 0", zero_text)
+        self.assertIn("AVAILABLE: 0", zero_text)
+        self.assertIn("REGISTERED: 2", zero_text)
 
     def test_50_entry_report_is_split_without_losing_entries(self):
         session = FakeTelegramSession()
-        entries = [sample_evaluation(50 + (index % 45)) for index in range(50)]
+        entries = [sample_evaluation(7.0 + ((index % 30) / 10.0)) for index in range(50)]
         for index, item in enumerate(entries, start=1):
             item.domain = f"candidate{index}.com"
         sent, message = send_daily_summary(entries, bot_token="test-token", chat_id="test-chat", session=session, dataset_date="2026-08-19", source="test-source")
@@ -241,7 +269,7 @@ class HunterTests(unittest.TestCase):
         combined = "\n".join(payload[1]["text"] for payload in session.payloads)
         self.assertEqual(sum(combined.count(f"candidate{index}.com") for index in range(1, 51)), 50)
         self.assertIn("2026-08-19", combined)
-        self.assertEqual(message, f"Telegram TOP 50 report sent in {len(session.payloads)} message(s).")
+        self.assertEqual(message, f"Telegram AVAILABLE-only report sent in {len(session.payloads)} message(s).")
 
     def test_summary_contains_manual_verification_label(self):
         self.assertIn("manual verification required", build_summary_for_test([sample_evaluation()]))

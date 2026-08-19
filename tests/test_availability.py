@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import requests
+
 from src.availability import AVAILABLE, PENDING, REGISTERED, UNKNOWN, VerisignRdapChecker
 
 
@@ -24,7 +26,10 @@ class FakeSession:
 
     def get(self, url, timeout):
         self.urls.append((url, timeout))
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class AvailabilityTests(unittest.TestCase):
@@ -49,6 +54,12 @@ class AvailabilityTests(unittest.TestCase):
         rate_limited = VerisignRdapChecker(session=FakeSession([FakeResponse(429, {"errorCode": 429})]), max_requests=1).check("rate-limited.com")
         self.assertEqual(malformed.registration_status, UNKNOWN)
         self.assertEqual(rate_limited.registration_status, UNKNOWN)
+
+    def test_timeout_and_5xx_are_unknown(self):
+        timeout_result = VerisignRdapChecker(session=FakeSession([requests.Timeout("slow")]), max_requests=1).check("timeout-example.com")
+        server_result = VerisignRdapChecker(session=FakeSession([FakeResponse(503, {"errorCode": 503})]), max_requests=1).check("server-error-example.com")
+        self.assertEqual(timeout_result.registration_status, UNKNOWN)
+        self.assertEqual(server_result.registration_status, UNKNOWN)
 
     def test_budget_exhaustion_is_unknown_and_not_available(self):
         checker = VerisignRdapChecker(session=FakeSession([]), max_requests=0)

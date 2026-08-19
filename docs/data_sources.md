@@ -10,7 +10,7 @@ The scheduled collector uses exactly one automatic input source:
 
 The feed is retrieved with an ordinary public HTTPS GET request and a descriptive User-Agent. It does not require a login, CAPTCHA, interactive scraping, anti-bot bypass, or paid API. The source is a partial daily subset, not a complete registry-wide list.
 
-The source provider’s own README uses **expired** broadly: it includes domains that have expired or entered an expiry-related stage such as redemption or pending delete. Therefore, the source label is not treated as proof of hand-registration availability. Current lifecycle and availability are verified separately through authoritative Verisign `.COM` RDAP before any domain can be considered a BUY CANDIDATE.
+The source provider’s own README uses **expired** broadly: it includes domains that have expired or entered an expiry-related stage such as redemption or pending delete. Therefore, the source label is not treated as proof of hand-registration availability. Current lifecycle and availability are verified separately through authoritative Verisign `.COM` RDAP before any domain can be considered a final candidate.
 
 The default feed set contains only `whoisfreaks_expired`. The WhoisFreaks dropped feed and UniqueDomains extract are not loaded by the main pipeline. The checked-in CSV remains an explicit local fallback only; the scheduled workflow does not pass it, so a failed automatic source causes the scheduled collection step to fail instead of silently reusing stale or unverified data.
 
@@ -56,21 +56,21 @@ The source audit files and hashes are retained outside the repository for the ex
 
 The collector admits only the selected expired feed and only syntactically valid `.COM` domains. Any non-expired lifecycle feed passed through explicit test or local arguments is marked `excluded` and contributes zero records. Pending delete, redemption, auction, backorder, expiring, pre-release, bidding, buy-now, and aftermarket records are never relabeled as expired.
 
-After source filtering, `.COM` filtering, deduplication, cheap quality/spam filtering, and initial scoring, the Hunter ranks all qualifying domains and selects the TOP 50. Verisign RDAP then enriches those TOP 50 entries. RDAP is not a hard gate for appearing in the report, but it is mandatory before any domain can be considered a BUY CANDIDATE.
+After source filtering, `.COM` filtering, deduplication, cheap quality/spam filtering, and strict initial 0–10 scoring, the Hunter sends the strongest initial candidates to Verisign RDAP. Only `AVAILABLE` results continue to Wayback/history and final scoring. The final output is capped at 50 but may contain fewer than 50 or zero entries. `AVAILABLE` plus final score `>= 7.0/10` is mandatory for a final candidate.
 
 | Outcome | Meaning | Hand-registration treatment |
 |---|---|---|
 | `AVAILABLE` | Valid Verisign `.COM` RDAP 404 error object with no domain object | Candidate for normal registration; verify at the registrar immediately before purchase |
 | `REGISTERED` | Valid RDAP domain object without pending/hold markers | Not hand-registerable |
-| `PENDING` | RDAP domain object contains pending-delete, redemption, server-hold, or client-hold indicators | Excluded from BUY CANDIDATES |
-| `AUCTION` | Source lifecycle indicates auction, bidding, backorder, or aftermarket | Excluded before the TOP 50 |
+| `PENDING` | RDAP domain object contains pending-delete, redemption, server-hold, or client-hold indicators | Excluded from final candidates |
+| `AUCTION` | Source lifecycle indicates auction, bidding, backorder, or aftermarket | Excluded from final candidates |
 | `UNKNOWN` | Timeout, malformed response, rate limit, access restriction, server error, or other inconclusive response | Never treated as available |
 
 The `.COM` endpoint is `https://rdap.verisign.com/com/v1/domain/<domain>`. The implementation follows the [Verisign RDAP documentation](https://www.verisign.com/news-insights/registration-data-access-protocol/help/) and the [IANA RDAP bootstrap registry](https://www.iana.org/assignments/rdap-dns/rdap-dns.xhtml). A valid RDAP 404 is a point-in-time registry signal, not a guarantee that registrar checkout will succeed.
 
-## Existing ranking, schedules, and duplicate protection
+## Ranking, schedules, and duplicate protection
 
-The existing investor-quality scorer is unchanged by the source correction. After source validation, the existing quality filters and ranking produce the TOP 50. The default scheduled RDAP budget remains 50, and the report preserves source provenance, scores, classifications, availability, and explanations.
+The investor-quality scorer uses a strict 0–10 model with natural-language quality, brandability, commercial/end-user demand, shortness, keyword quality, resale potential, and broad clean market appeal. The default scheduled RDAP budget remains 50 and is spent on the strongest initial candidates, not arbitrary source order. Only AVAILABLE candidates receive Wayback/history checks and final scoring. The final report preserves source provenance, scores, classifications, explanations, and truthful run counts.
 
 Each successful feed records `ETag`, `Last-Modified`, parsed dataset date, content SHA-256, source URL, and feed name. These stable identifiers form the dataset fingerprint. Persistent state records each reported fingerprint, so the same dataset is not sent again. Scheduled polling remains at **08:00, 14:00, and 20:00 UTC**, with manual `workflow_dispatch` preserved.
 
@@ -78,7 +78,7 @@ Each successful feed records `ETag`, `Last-Modified`, parsed dataset date, conte
 
 ## Limitations
 
-The selected WhoisFreaks feed is the strongest compliant free machine-readable source found, but it is only a 10,000-row daily subset and its own definition includes expiry-related stages such as redemption and pending delete. Consequently, the system can prove the lifecycle of the candidates it checks through Verisign RDAP, but it cannot honestly claim that every raw source row is immediately hand-registerable or that the feed is complete. Domains with `PENDING` or `UNKNOWN` RDAP results are never treated as available, and no BUY CANDIDATE is produced unless a candidate receives `AVAILABLE` status.
+The selected WhoisFreaks feed is the strongest compliant free machine-readable source found, but it is only a 10,000-row daily subset and its own definition includes expiry-related stages such as redemption and pending delete. Consequently, the system cannot claim that every raw row is immediately hand-registerable. Verisign RDAP is the authoritative point-in-time gate: `REGISTERED`, `PENDING`, `AUCTION`, and `UNKNOWN` are rejected from the final list, and no final candidate is produced unless it is `AVAILABLE` and scores at least 7.0/10. If zero domains qualify, the system sends the required zero-result message rather than filling the list.
 
 ## References
 
