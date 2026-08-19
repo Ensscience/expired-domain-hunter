@@ -45,6 +45,9 @@ RESULT_COLUMNS = [
     "end_user_potential",
     "potential_industries",
     "reason",
+    "main_strength",
+    "main_weakness",
+    "trademark_risk_flag",
     "wayback_url",
 ]
 
@@ -128,9 +131,13 @@ def write_results(evaluations: list[Evaluation], output_dir: Path, summary: dict
         else:
             for rank, item in enumerate(evaluations, start=1):
                 handle.write(f"{rank}. {item.domain}\n")
-                handle.write(f"   Score: {item.score}/100 | Status: {item.registration_status}\n")
+                handle.write(f"   Score: {item.score}/100 | Classification: {item.classification} | Status: {item.registration_status}\n")
                 handle.write(f"   Source: {item.sources}\n")
                 handle.write(f"   Why: {item.reason}\n")
+                handle.write(f"   Main strength: {item.main_strength}\n")
+                handle.write(f"   Main weakness: {item.main_weakness}\n")
+                if item.trademark_risk_flag:
+                    handle.write(f"   Trademark risk: {item.trademark_risk_flag}\n")
                 if item.wayback_url:
                     handle.write(f"   RDAP/Wayback: {item.wayback_url}\n")
                 handle.write("\n")

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from hunter import RESULT_COLUMNS, run, write_results
+from config import classification
 from src.data_source import DomainCandidate, load_domains, parse_rows
 from src.filters import inspect_candidate
 from src.history import HistorySignals, WaybackClient
@@ -139,10 +140,38 @@ class HunterTests(unittest.TestCase):
         )
         result = evaluate(candidate, filters, history)
         self.assertGreaterEqual(result.score, 65)
-        self.assertIn(result.classification, {"WATCH", "BUY CANDIDATE"})
+        self.assertIn(result.classification, {"EXCEPTIONAL", "STRONG", "GOOD", "WATCH", "WEAK", "IGNORE"})
         self.assertTrue(result.suggested_max_bid.startswith("$"))
         self.assertIn("manual verification", result.reason)
         self.assertLessEqual(float(result.suggested_max_bid.replace("$", "").replace(",", "")), 250)
+
+    def test_classification_bands_and_investor_examples(self):
+        self.assertEqual(classification(95), "EXCEPTIONAL")
+        self.assertEqual(classification(85), "STRONG")
+        self.assertEqual(classification(75), "GOOD")
+        self.assertEqual(classification(65), "WATCH")
+        self.assertEqual(classification(55), "WEAK")
+        self.assertEqual(classification(49), "IGNORE")
+        for domain in ("cloudpay.com", "fastmoney.com"):
+            candidate = DomainCandidate(domain=domain, status="expired")
+            result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
+            self.assertGreaterEqual(result.score, 55)
+        for domain in ("vismaweb.com", "webullotc.com"):
+            candidate = DomainCandidate(domain=domain, status="expired")
+            result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
+            self.assertIn("Trademark risk", result.trademark_risk_flag)
+            self.assertLess(result.score, 50)
+
+    def test_generic_suffix_regression_names_are_not_inflated(self):
+        weak_names = ["paydoshop.com", "payupshop.com", "shopicontech.com", "datakudi.com", "ukrantech.com", "wojodtech.com", "yaorashop.com"]
+        scores = []
+        for domain in weak_names:
+            candidate = DomainCandidate(domain=domain, status="expired")
+            result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
+            scores.append(result.score)
+            self.assertLess(result.score, 60, domain)
+            self.assertIn(result.classification, {"WEAK", "IGNORE"})
+        self.assertLess(max(scores), 60)
 
     def test_empty_dataset_and_output_schema(self):
         with tempfile.TemporaryDirectory() as directory:

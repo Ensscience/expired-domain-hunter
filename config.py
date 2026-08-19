@@ -25,19 +25,23 @@ SCORING_WEIGHTS = {
     "end_user_potential": 10,
 }
 BUY_THRESHOLD = 80
-WATCH_THRESHOLD = 65
+WATCH_THRESHOLD = 60
 
 # Penalties are applied after the positive score and are capped in magnitude.
 PENALTIES = {
     "numbers": 5,
     "hyphens": 7,
-    "awkward_spelling": 6,
+    "awkward_spelling": 8,
     "suspicious_history": 12,
     "spam": 20,
-    "trademark_risk": 8,
-    "weak_commercial_potential": 8,
+    "trademark_risk": 15,
+    "weak_commercial_potential": 10,
+    "generic_suffix": 8,
+    "keyword_stuffing": 10,
+    "invented_string": 10,
+    "long_three_word": 8,
 }
-MAX_PENALTY = 35
+MAX_PENALTY = 55
 
 # Public service safeguards. The Wayback endpoint is checked only for the
 # shortlisted domains, with caching and a modest request budget.
@@ -66,10 +70,16 @@ TELEGRAM_MAX_ITEMS = int(os.getenv("TELEGRAM_MAX_ITEMS", "10"))
 
 
 def classification(score: int) -> str:
-    """Return the user-facing classification for a 0-100 score."""
+    """Return the investor-style quality classification for a 0-100 score."""
 
-    if score >= BUY_THRESHOLD:
-        return "BUY CANDIDATE"
-    if score >= WATCH_THRESHOLD:
+    if score >= 90:
+        return "EXCEPTIONAL"
+    if score >= 80:
+        return "STRONG"
+    if score >= 70:
+        return "GOOD"
+    if score >= 60:
         return "WATCH"
+    if score >= 50:
+        return "WEAK"
     return "IGNORE"

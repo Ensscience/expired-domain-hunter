@@ -49,6 +49,9 @@ TRADEMARK_RISK_TERMS = {
     "tesla",
     "nike",
     "coca-cola",
+    "visma",
+    "webull",
+    "whatsapp",
 }
 
 ACTIVE_STATUS_TERMS = {"active", "registered", "live", "reserved"}

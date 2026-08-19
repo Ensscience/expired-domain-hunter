@@ -30,9 +30,13 @@ def _entry(index: int, item: Evaluation) -> str:
         [
             f"{index}. {item.domain}",
             f"Score: {item.score}/100",
+            f"Classification: {item.classification}",
             f"Status: {_status_label(getattr(item, 'registration_status', 'UNKNOWN'))}",
             f"Source: {getattr(item, 'sources', '') or getattr(item, 'source', 'unknown')}",
             f"Why: {item.reason}",
+            f"Main strength: {getattr(item, 'main_strength', '')}",
+            f"Main weakness: {getattr(item, 'main_weakness', '')}",
+            *( [f"Trademark risk: {item.trademark_risk_flag}"] if getattr(item, 'trademark_risk_flag', '') else [] ),
         ]
     )
 

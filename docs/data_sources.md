@@ -43,9 +43,9 @@ The implementation uses these outcomes:
 
 An RDAP 404 is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. A name may be registered between the check and purchase, or subject to registry/registrar restrictions. The project therefore labels all results for manual verification and never treats `UNKNOWN` as available.
 
-## Quality-first RDAP selection
+## Investor-style quality ranking and RDAP enrichment
 
-The default scheduled RDAP budget remains 50. The hunter computes the existing score with neutral history for every locally acceptable candidate, ranks candidates by quality score, commercial intent, keyword quality, brandability, end-user potential, shorter label length, and domain name as a deterministic tie-breaker, then selects the TOP 50. RDAP enriches up to 50 TOP 50 entries; a domain with a high score and UNKNOWN status remains in the report and is never described as available.
+The default scheduled RDAP budget remains 50. The hunter computes the revised investor-style quality score with neutral history for every locally acceptable candidate, ranking authentic short English words, selective natural two-word phrases, clear commercial meaning, brandability, and realistic end-user potential above generic or invented combinations. It penalizes awkward order, generic suffix stuffing, long three-or-more-word names, unrecognized tokens, spam patterns, and trademark-risk signals. The TOP 50 are selected by this quality score, not by source order or RDAP outcome. RDAP enriches up to 50 TOP 50 entries; a high-quality candidate with UNKNOWN status remains in the report and is never described as available.
 
 Each successful feed records `ETag`, `Last-Modified`, parsed dataset date, content SHA-256, source URL, and feed name. These stable identifiers form the dataset fingerprint. Persistent state records each reported fingerprint, so the same dataset is not sent again. Scheduled polling occurs at 08:00, 14:00, and 20:00 UTC; because GitHub Actions is not an always-on feed listener, expected detection delay is near-zero to approximately six hours after a source update.
 
@@ -55,7 +55,7 @@ Each successful feed records `ETag`, `Last-Modified`, parsed dataset date, conte
 
 ## Limitations
 
-The WhoisFreaks free feeds are partial subsets and are not a complete registry-wide list of all expired or dropped `.COM` domains. The UniqueDomains feed is only a 1,000-row one-word extract. RDAP is status enrichment rather than a quality gate, and its point-in-time result is not a guarantee that registrar checkout will succeed. The pipeline favors transparent quality ranking and accurate availability labels over pretending to provide complete market coverage.
+The WhoisFreaks free feeds are partial subsets and are not a complete registry-wide list of all expired or dropped `.COM` domains. The UniqueDomains feed is only a 1,000-row one-word extract. RDAP is status enrichment rather than a quality gate, and its point-in-time result is not a guarantee that registrar checkout will succeed. The pipeline favors transparent quality ranking and accurate availability labels over pretending to provide complete market coverage. It is intentionally acceptable for a poor dataset to contain no GOOD, STRONG, or EXCEPTIONAL domains.
 
 ## References
 

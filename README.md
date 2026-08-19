@@ -134,21 +134,28 @@ The positive score is transparent and totals 100 points before penalties.
 | End-user potential | 10 |
 | **Total** | **100** |
 
-The system then applies bounded penalties for numbers, hyphens, awkward spelling, suspicious history, spam signals, possible trademark risk, and weak commercial potential. The classification thresholds are:
+The system then applies bounded penalties for generic suffixes, keyword stuffing, awkward word combinations, invented strings, three-or-more-word structures, numbers, hyphens, suspicious history, spam signals, possible trademark risk, and weak specific commercial potential. Generic terms such as `tech`, `shop`, `pay`, `app`, `web`, `store`, `online`, and `digital` do not receive large positive credit by themselves. They help only when the complete name is a recognized, natural, memorable, commercially meaningful phrase.
+
+The classification thresholds are:
 
 | Score | Classification |
 |---:|---|
-| 80–100 | BUY CANDIDATE |
-| 65–79 | WATCH |
-| 0–64 | IGNORE |
+| 90–100 | EXCEPTIONAL |
+| 80–89 | STRONG |
+| 70–79 | GOOD |
+| 60–69 | WATCH |
+| 50–59 | WEAK |
+| Below 50 | IGNORE |
 
-End-user potential is intentionally separate from SEO metrics. For strong candidates, the system infers likely industries and business types from the name and keyword fields and records why a real company might want the domain. This is a prioritization aid, not a prediction of buyer demand.
+The model gives its strongest name-quality credit to short recognized English words and selective natural two-word combinations. Three-or-more-word names, unrecognized tokens, generic modifiers, awkward order, repeated generic terms, difficult spelling, and random/generated-looking strings are penalized. The scoring model is deliberately calibrated so a poor dataset can have no domains above 70; it does not force BUY CANDIDATE or STRONG classifications.
+
+End-user potential is strict and specific. The model records a plausible industry only when the actual recognized words and their combination establish a concrete market signal. It does not append generic technology, ecommerce, or business-service explanations to arbitrary names. Potential buyers and resale value remain hypotheses requiring manual research.
 
 ## Resale estimate and maximum bid
 
 For each ranked candidate, the program writes an estimated resale range and a conservative suggested maximum bid. The bid is deliberately capped and is based on the lower portion of the heuristic resale range rather than the optimistic upper bound. The TOP 50 Telegram summary and human-readable report include:
 
-> **AI estimate — manual verification required.**
+> **Heuristic resale estimate — manual verification required.**
 
 The system is intended to surface opportunities where possible resale value is materially greater than a conservative acquisition limit. It does not know registrar fees, auction competition, renewal fees, negotiations, buyer-specific budgets, exact trademark status, or whether a name is actually available.
 
@@ -159,7 +166,7 @@ The workflow reads these GitHub Actions secrets and never hard-codes them:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-The Telegram Bot API is called only from the workflow or from an explicitly requested local command. For every genuinely new dataset, the system sends one consolidated **TOP 50 EXPIRED .COM** report, split into multiple Telegram messages only when the message-length limit requires it. Each entry includes its rank, quality score, availability status, source provenance, and reason. The report explicitly states **QUALITY SCORE ≠ AVAILABILITY**. `AVAILABLE` means verify at a registrar before registration; `UNKNOWN` is never described as available. The API endpoint and message method follow the public [Telegram Bot API documentation](https://core.telegram.org/bots/api).
+The Telegram Bot API is called only from the workflow or from an explicitly requested local command. For every genuinely new dataset, the system sends one consolidated **TOP 50 EXPIRED .COM** report, split into multiple Telegram messages only when the message-length limit requires it. Each entry includes its rank, score, classification, availability status, source provenance, specific reason, main strength, main weakness, and trademark-risk flag where relevant. The report explicitly states **QUALITY SCORE ≠ AVAILABILITY**. `AVAILABLE` means verify at a registrar before registration; `UNKNOWN` is never described as available. The API endpoint and message method follow the public [Telegram Bot API documentation](https://core.telegram.org/bots/api).
 
 To test delivery manually from GitHub Actions, open the **Expired Domain Hunter** workflow, choose **Run workflow**, set **telegram_test** to `true`, and start it. This sends one clearly labeled integration-test message and then runs the normal hunt. The test option is opt-in and does not expose secrets in logs.
 
