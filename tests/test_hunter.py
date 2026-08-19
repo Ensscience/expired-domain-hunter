@@ -49,9 +49,11 @@ class FakeTelegramResponse:
 class FakeTelegramSession:
     def __init__(self):
         self.payload = None
+        self.payloads = []
 
     def post(self, endpoint, json, timeout):
         self.payload = (endpoint, json, timeout)
+        self.payloads.append(self.payload)
         return FakeTelegramResponse()
 
 
@@ -154,7 +156,7 @@ class HunterTests(unittest.TestCase):
             with (root / "output" / "results.csv").open(newline="", encoding="utf-8") as handle:
                 self.assertEqual(next(csv.reader(handle)), RESULT_COLUMNS)
 
-    def test_telegram_only_sends_one_summary_for_qualifying_domains(self):
+    def test_telegram_sends_one_consolidated_top50_summary(self):
         session = FakeTelegramSession()
         sent, message = send_daily_summary(
             [sample_evaluation(91), sample_evaluation(70)],
@@ -163,12 +165,27 @@ class HunterTests(unittest.TestCase):
             session=session,
         )
         self.assertTrue(sent)
-        self.assertIn("HAND-REG .COM OPPORTUNITIES", session.payload[1]["text"])
-        self.assertEqual(session.payload[1]["text"].count("smartinvoices.com"), 1)
-        self.assertEqual(message, "Telegram daily summary sent.")
-        skipped, skipped_message = send_daily_summary([sample_evaluation(70)], bot_token="test-token", chat_id="test-chat", session=session)
-        self.assertFalse(skipped)
-        self.assertIn("not sent", skipped_message)
+        self.assertIn("TOP 50 EXPIRED .COM", session.payload[1]["text"])
+        self.assertIn("QUALITY SCORE ≠ AVAILABILITY", session.payload[1]["text"])
+        self.assertEqual(session.payload[1]["text"].count("smartinvoices.com"), 2)
+        self.assertEqual(message, "Telegram TOP 50 report sent in 1 message(s).")
+        sent_empty, empty_message = send_daily_summary([], bot_token="test-token", chat_id="test-chat", session=session)
+        self.assertTrue(sent_empty)
+        self.assertIn("TOP 50 EXPIRED .COM", session.payload[1]["text"])
+        self.assertEqual(empty_message, "Telegram TOP 50 report sent in 1 message(s).")
+
+    def test_50_entry_report_is_split_without_losing_entries(self):
+        session = FakeTelegramSession()
+        entries = [sample_evaluation(50 + (index % 45)) for index in range(50)]
+        for index, item in enumerate(entries, start=1):
+            item.domain = f"candidate{index}.com"
+        sent, message = send_daily_summary(entries, bot_token="test-token", chat_id="test-chat", session=session, dataset_date="2026-08-19", source="test-source")
+        self.assertTrue(sent)
+        self.assertGreater(len(session.payloads), 1)
+        combined = "\n".join(payload[1]["text"] for payload in session.payloads)
+        self.assertEqual(sum(combined.count(f"candidate{index}.com") for index in range(1, 51)), 50)
+        self.assertIn("2026-08-19", combined)
+        self.assertEqual(message, f"Telegram TOP 50 report sent in {len(session.payloads)} message(s).")
 
     def test_summary_contains_manual_verification_label(self):
         self.assertIn("manual verification required", build_summary_for_test([sample_evaluation()]))

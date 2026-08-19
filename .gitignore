@@ -8,3 +8,4 @@ output/results.csv
 output/top_domains.txt
 output/run_summary.json
 output/collection_summary.json
+output/source_report.csv

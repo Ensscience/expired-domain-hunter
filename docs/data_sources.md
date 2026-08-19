@@ -24,7 +24,7 @@ The official [ExpiredDomains.net FAQ](https://www.expireddomains.net/faq/) says 
 
 ## Current availability verification
 
-After lifecycle filtering, `.COM` filtering, cheap local quality/spam filtering, and neutral-history initial scoring, only the strongest candidates up to the configured budget are checked against Verisign’s authoritative `.COM` RDAP service. Wayback/history enrichment and final scoring occur only for candidates that are verified `AVAILABLE`:
+After lifecycle filtering, `.COM` filtering, deduplication, cheap quality/spam filtering, and initial scoring, the Hunter ranks all qualifying domains and selects the TOP 50. Verisign RDAP then enriches those TOP 50 candidates; RDAP is not a hard gate for appearing in the report. Wayback/history enrichment and final scoring are applied where appropriate:
 
 - Official Verisign RDAP help: [Registration Data Access Protocol Help](https://www.verisign.com/news-insights/registration-data-access-protocol/help/)
 - IANA registry mapping: [Bootstrap Service Registry for Domain Name Space](https://www.iana.org/assignments/rdap-dns/rdap-dns.xhtml)
@@ -35,25 +35,27 @@ The implementation uses these outcomes:
 
 | Outcome | Meaning | Can alert? |
 |---|---|---:|
-| `AVAILABLE` | Valid Verisign RDAP 404 error object with no domain object | Yes, subject to score and deduplication |
-| `REGISTERED` | Valid RDAP domain object | No |
-| `PENDING` | Domain object contains pending/hold lifecycle indicators | No |
-| `AUCTION` | Source lifecycle indicates auction, bidding, backorder, or aftermarket | No |
-| `UNKNOWN` | Timeout, malformed response, rate limit, access restriction, server error, or other inconclusive response | No |
+| `AVAILABLE` | Valid Verisign RDAP 404 error object with no domain object | Labeled AVAILABLE; verify at registrar |
+| `REGISTERED` | Valid RDAP domain object | Labeled REGISTERED |
+| `PENDING` | Domain object contains pending/hold lifecycle indicators | Labeled PENDING |
+| `AUCTION` | Source lifecycle indicates auction, bidding, backorder, or aftermarket | Excluded before TOP 50 |
+| `UNKNOWN` | Timeout, malformed response, rate limit, access restriction, server error, or other inconclusive response | Labeled UNKNOWN; may remain in TOP 50 |
 
 An RDAP 404 is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. A name may be registered between the check and purchase, or subject to registry/registrar restrictions. The project therefore labels all results for manual verification and never treats `UNKNOWN` as available.
 
 ## Quality-first RDAP selection
 
-The default scheduled RDAP budget remains 50. The hunter first computes the existing score with neutral history for every locally acceptable candidate, then ranks candidates by initial score, shorter label length, commercial intent, keyword quality, brandability plus end-user potential, and domain name as a deterministic tie-breaker. The first 50 in that quality ranking consume RDAP requests; source-file order is not used to choose the budget. Candidates outside the budget remain deferred rather than being represented as available or rejected.
+The default scheduled RDAP budget remains 50. The hunter computes the existing score with neutral history for every locally acceptable candidate, ranks candidates by quality score, commercial intent, keyword quality, brandability, end-user potential, shorter label length, and domain name as a deterministic tie-breaker, then selects the TOP 50. RDAP enriches up to 50 TOP 50 entries; a domain with a high score and UNKNOWN status remains in the report and is never described as available.
+
+Each successful feed records `ETag`, `Last-Modified`, parsed dataset date, content SHA-256, source URL, and feed name. These stable identifiers form the dataset fingerprint. Persistent state records each reported fingerprint, so the same dataset is not sent again. Scheduled polling occurs at 08:00, 14:00, and 20:00 UTC; because GitHub Actions is not an always-on feed listener, expected detection delay is near-zero to approximately six hours after a source update.
 
 ## Duplicate protection
 
-`.state/processed_domains.json` is persisted through GitHub Actions cache. A domain marked sent is never alerted again. Recently processed registered, pending, auction, filtered, and other non-qualifying domains are cooled down. UNKNOWN results and unsent qualifying AVAILABLE results can be retried later so temporary RDAP or Telegram failures are not treated as permanent.
+`.state/processed_domains.json` is persisted through GitHub Actions cache. It stores dataset report fingerprints and timestamps alongside domain status records. A dataset marked sent is never reported again. If the source content hash or other reliable feed identity changes, the new dataset can produce a new TOP 50 report.
 
 ## Limitations
 
-The WhoisFreaks free feeds are partial subsets and are not a complete registry-wide list of all expired or dropped `.COM` domains. The UniqueDomains feed is only a 1,000-row one-word extract. These sources do not supply a complete guarantee of current hand-registerability, which is why the independent Verisign RDAP check is mandatory. The pipeline favors correctness and compliance over pretending to provide complete market coverage.
+The WhoisFreaks free feeds are partial subsets and are not a complete registry-wide list of all expired or dropped `.COM` domains. The UniqueDomains feed is only a 1,000-row one-word extract. RDAP is status enrichment rather than a quality gate, and its point-in-time result is not a guarantee that registrar checkout will succeed. The pipeline favors transparent quality ranking and accurate availability labels over pretending to provide complete market coverage.
 
 ## References
 

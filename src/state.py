@@ -1,8 +1,8 @@
-"""Persistent processed-domain and notification state.
+"""Persistent processed-domain and dataset notification state.
 
 GitHub Actions restores and saves this directory through the workflow cache.
-The state is advisory: a sent domain is never alerted again, while UNKNOWN and
-other statuses are rechecked after a cooldown.
+Sent datasets are not reported again, while the existing domain-level status
+records continue to support availability cooldowns and retries.
 """
 
 from __future__ import annotations
@@ -16,18 +16,24 @@ from typing import Any
 class ProcessState:
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.data: dict[str, Any] = {"version": 1, "domains": {}}
+        self.data: dict[str, Any] = {"version": 2, "domains": {}, "datasets": {}}
         if self.path.exists() and self.path.stat().st_size:
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict) and isinstance(loaded.get("domains"), dict):
                     self.data = loaded
+                    self.data.setdefault("version", 2)
+                    self.data.setdefault("datasets", {})
             except (OSError, ValueError, TypeError):
-                self.data = {"version": 1, "domains": {}}
+                self.data = {"version": 2, "domains": {}, "datasets": {}}
 
     @property
     def domains(self) -> dict[str, dict[str, Any]]:
         return self.data.setdefault("domains", {})
+
+    @property
+    def datasets(self) -> dict[str, dict[str, Any]]:
+        return self.data.setdefault("datasets", {})
 
     def get(self, domain: str) -> dict[str, Any] | None:
         value = self.domains.get(domain.lower().strip().rstrip("."))
@@ -36,6 +42,24 @@ class ProcessState:
     def was_sent(self, domain: str) -> bool:
         record = self.get(domain)
         return bool(record and record.get("sent"))
+
+    def dataset_record(self, dataset_id: str) -> dict[str, Any] | None:
+        value = self.datasets.get(dataset_id)
+        return value if isinstance(value, dict) else None
+
+    def dataset_was_sent(self, dataset_id: str) -> bool:
+        record = self.dataset_record(dataset_id)
+        return bool(record and record.get("sent"))
+
+    def mark_dataset_sent(self, dataset_id: str, *, sent_at_utc: str, dataset_date: str, source: str, top_count: int) -> None:
+        self.datasets[dataset_id] = {
+            **(self.dataset_record(dataset_id) or {}),
+            "sent": True,
+            "sent_at_utc": sent_at_utc,
+            "dataset_date": dataset_date,
+            "source": source,
+            "top_count": top_count,
+        }
 
     def should_skip(self, domain: str, now: datetime | None = None) -> bool:
         """Skip recently processed domains, but allow UNKNOWN rechecks sooner."""

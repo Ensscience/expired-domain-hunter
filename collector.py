@@ -37,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(json.dumps({
         "source": result.source,
+        "dataset_id": result.dataset_id,
+        "dataset_date": result.dataset_date,
+        "dataset_date_source": result.dataset_date_source,
         "fallback_used": result.fallback_used,
         "collected_lines": result.collected_lines,
         "unique_com_domains": result.unique_com_domains,

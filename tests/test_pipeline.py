@@ -52,6 +52,32 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(checker.calls, ["smartinvoices.com"])
             self.assertEqual(stats["available"], 1)
 
+    def test_top50_does_not_require_rdap_availability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "domains.csv"
+            input_path.write_text(
+                "domain,status,source\n"
+                "smartinvoices.com,expired,source-a\n"
+                "cloudledger.com,dropped,source-a\n",
+                encoding="utf-8",
+            )
+            checker = FakeChecker({})
+            evaluations, stats, rejected = run(
+                input_path,
+                root / "output",
+                skip_wayback=True,
+                availability_checker=checker,
+                state=ProcessState(root / "state.json"),
+                max_availability=0,
+            )
+            self.assertEqual(rejected, [])
+            self.assertEqual(len(evaluations), 2)
+            self.assertEqual(stats["top50_count"], 2)
+            self.assertEqual(stats["rdap_selected"], 0)
+            self.assertTrue(all(item.registration_status == UNKNOWN for item in evaluations))
+            self.assertEqual(checker.calls, [])
+
     def test_only_available_candidates_enter_quality_and_scoring_pipeline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -82,8 +108,9 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(rejected, [])
             self.assertEqual(stats["available"], 1)
             self.assertEqual(stats["registered"], 1)
-            self.assertEqual(stats["pending"], 1)
-            self.assertEqual(stats["auction"], 1)
+            self.assertEqual(stats["pending"], 0)
+            self.assertEqual(stats["auction"], 0)
+            self.assertEqual(stats["lifecycle_filtered"], 2)
             self.assertEqual(stats["unknown"], 1)
             self.assertNotIn("pendingname.com", checker.calls)
             self.assertNotIn("auctionname.com", checker.calls)
@@ -95,7 +122,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(by_domain["unknownname.com"].registration_status, UNKNOWN)
             with (root / "output" / "results.csv").open(newline="", encoding="utf-8") as handle:
                 rows = list(csv.DictReader(handle))
-            self.assertIn("registration_status", rows[0])
+            self.assertIn("availability_status", rows[0])
             self.assertIn("sources", rows[0])
 
 

@@ -64,7 +64,11 @@ class CollectorTests(unittest.TestCase):
                 {"domain": "alpha.com", "status": "dropped;expired", "source": "whoisfreaks-public-github", "source_count": "1", "sources": "whoisfreaks-public-github"},
                 {"domain": "beta.com", "status": "dropped", "source": "whoisfreaks-public-github", "source_count": "1", "sources": "whoisfreaks-public-github"},
             ])
-            self.assertEqual(json.loads(summary.read_text(encoding="utf-8"))["unique_com_domains"], 2)
+            summary_value = json.loads(summary.read_text(encoding="utf-8"))
+            self.assertEqual(summary_value["unique_com_domains"], 2)
+            self.assertTrue(summary_value["dataset_id"].startswith("feeds:"))
+            self.assertTrue(summary_value["dataset_date"])
+            self.assertTrue((root / "output" / "source_report.csv").exists())
 
     def test_secondary_expired_csv_feed_and_lifecycle_exclusion(self):
         feeds = {"uniquedomains_expired": "https://example.test/unique.csv"}
