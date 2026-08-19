@@ -25,11 +25,9 @@ from src.data_source import is_valid_com_domain
 
 DEFAULT_FEEDS = {
     "whoisfreaks_expired": "https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv",
-    "whoisfreaks_dropped": "https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-dropped-domains.csv",
-    "uniquedomains_expired": "https://raw.githubusercontent.com/UniqueDomains/expired-oneword-domains/main/expired.csv",
 }
 COLLECTOR_USER_AGENT = "expired-domain-hunter/1.1 (+https://github.com/Ensscience/expired-domain-hunter)"
-ALLOWED_LIFECYCLE = {"expired", "dropped", "deleted"}
+ALLOWED_LIFECYCLE = {"expired"}
 EXCLUDED_LIFECYCLE_MARKERS = {
     "pending",
     "auction",
@@ -103,10 +101,14 @@ def _clean_domain(line: str) -> str:
 def _source_label(feed: str) -> str:
     if feed.startswith("uniquedomains"):
         return "uniquedomains-public-extract"
-    return "whoisfreaks-public-github"
+    if "dropped" in feed:
+        return "whoisfreaks-public-github-dropped-control"
+    return "whoisfreaks-public-github-expired"
 
 
 def _lifecycle(feed: str) -> str:
+    if "uniquedomains" in feed:
+        return "excluded"
     return "dropped" if "dropped" in feed else "expired"
 
 
@@ -166,9 +168,17 @@ def _parse_feed(feed: str, text: str, url: str) -> tuple[list[CollectedDomain], 
     records: list[CollectedDomain] = []
     invalid = 0
 
-    # UniqueDomains publishes a real CSV extract; WhoisFreaks publishes one
-    # domain per line despite the .csv filename.
-    if "uniquedomains" in feed or text.lstrip().lower().startswith("id,domain,status"):
+    # These feeds are intentionally not part of the main expired-only
+    # pipeline. Count them for the source report, but never admit their rows.
+    if lifecycle != "expired":
+        raw_count = len(list(csv.DictReader(io.StringIO(text)))) if "uniquedomains" in feed or text.lstrip().lower().startswith("id,domain,status") else len(text.splitlines())
+        return [], FeedResult("excluded", feed, url, lifecycle, raw_count, 0, raw_count)
+
+    # Generic CSV expired sources are parsed by status; the public WhoisFreaks
+    # domain per line despite the .csv filename. Only rows explicitly classified
+    # as expired are admitted; dropped, deleted, and other lifecycle feeds are
+    # rejected rather than relabeled as expired.
+    if text.lstrip().lower().startswith("id,domain,status"):
         rows = csv.DictReader(io.StringIO(text))
         raw_count = 0
         for row in rows:
@@ -188,10 +198,10 @@ def _parse_feed(feed: str, text: str, url: str) -> tuple[list[CollectedDomain], 
         domain = _clean_domain(line)
         if not domain or domain.startswith("#") or domain in {"domain", "domains"}:
             continue
-        if not is_valid_com_domain(domain):
+        if lifecycle != "expired" or not is_valid_com_domain(domain):
             invalid += 1
             continue
-        records.append(CollectedDomain(domain=domain, status=lifecycle, source=source, source_url=url))
+        records.append(CollectedDomain(domain=domain, status="expired", source=source, source_url=url))
     feed_result = FeedResult("ok", feed, url, lifecycle, len(lines), len(records), invalid)
     return records, feed_result
 
@@ -283,7 +293,7 @@ def collect_domains(
     fallback_path: str | Path | None = None,
     source_report_path: str | Path | None = None,
 ) -> CollectionResult:
-    """Download public expired/dropped feeds and write normalized `.COM` rows."""
+    """Download the compliant public expired-only feed and write normalized `.COM` rows."""
 
     output = Path(output_path)
     summary = Path(summary_path)
@@ -338,7 +348,7 @@ def collect_domains(
     dataset_date, dataset_date_source = _dataset_date(feed_results, generated_at_utc)
     result = CollectionResult(
         generated_at_utc=generated_at_utc,
-        source="WhoisFreaks public expired/dropped feeds + UniqueDomains public expired extract" if not fallback_used else "manual CSV fallback",
+        source="WhoisFreaks public expired feed only" if not fallback_used else "manual CSV fallback (not used by the scheduled workflow)",
         output_path=str(output),
         fallback_used=fallback_used,
         dataset_id=dataset_id,

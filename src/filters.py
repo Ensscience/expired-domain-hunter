@@ -56,6 +56,9 @@ TRADEMARK_RISK_TERMS = {
 
 ACTIVE_STATUS_TERMS = {"active", "registered", "live", "reserved"}
 EXCLUDED_STATUS_MARKERS = {
+    "dropped",
+    "deleted",
+    "redemption",
     "pending",
     "auction",
     "backorder",
@@ -137,7 +140,7 @@ def inspect_candidate(candidate: DomainCandidate) -> FilterResult:
     status = candidate.status.strip().lower()
     if status in ACTIVE_STATUS_TERMS or any(marker in status for marker in EXCLUDED_STATUS_MARKERS):
         accepted = False
-        reasons.append(f"status is not hand-registerable expired/dropped inventory: {candidate.status}")
+        reasons.append(f"status is not hand-registerable expired-source inventory: {candidate.status}")
 
     return FilterResult(
         accepted=accepted,

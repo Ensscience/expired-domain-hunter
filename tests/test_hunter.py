@@ -105,6 +105,9 @@ class HunterTests(unittest.TestCase):
         active_result = inspect_candidate(active)
         self.assertFalse(active_result.accepted)
         self.assertTrue(active_result.reasons)
+        for status in ("dropped", "deleted", "redemption period", "pending delete", "auction"):
+            lifecycle_result = inspect_candidate(DomainCandidate(domain="statuscheck.com", status=status))
+            self.assertFalse(lifecycle_result.accepted, status)
 
     def test_wayback_history_parsing_is_bounded(self):
         session = FakeSession()
@@ -120,7 +123,7 @@ class HunterTests(unittest.TestCase):
     def test_score_and_conservative_valuation(self):
         candidate = DomainCandidate(
             domain="smartinvoices.com",
-            status="dropped",
+            status="expired",
             backlinks=420,
             ref_domains=58,
             domain_age=12,

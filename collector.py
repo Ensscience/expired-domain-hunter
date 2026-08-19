@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the latest legitimate public expired/dropped domain feed."""
+"""Fetch the latest legitimate public expired-only domain feed."""
 
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ from pathlib import Path
 from src.collector import CollectionError, collect_domains
 
 
-# Keep the checked-in CSV import path as the manual fallback.
+# Keep the checked-in CSV import path as an explicit manual fallback only.
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Collect current expired and dropped domains from public free feeds.")
+    parser = argparse.ArgumentParser(description="Collect current expired-only .COM domains from a public free feed.")
     parser.add_argument("--output", type=Path, default=Path("input/domains.csv"), help="Normalized CSV output path")
     parser.add_argument("--summary", type=Path, default=Path("output/collection_summary.json"), help="Collection summary JSON path")
-    parser.add_argument("--fallback", type=Path, default=Path("input/domains.csv"), help="Existing CSV to keep if all public feeds fail")
+    parser.add_argument("--fallback", type=Path, default=Path("input/domains.csv"), help="Explicit manual CSV fallback if the public feed fails")
     parser.add_argument("--timeout", type=float, default=30.0, help="Per-feed HTTP timeout in seconds")
     parser.add_argument("--retries", type=int, default=2, help="Retries per feed after the first attempt")
     return parser

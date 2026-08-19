@@ -1,6 +1,6 @@
 # Expired Domain Hunter
 
-Expired Domain Hunter is a standalone Python utility for automatically collecting, filtering, scoring, ranking, and reporting the **TOP 50 expired or dropped `.COM` domains**. Availability is a separate RDAP-enriched property: `AVAILABLE`, `REGISTERED`, `PENDING`, `AUCTION`, and `UNKNOWN` are all explicitly labeled, and `UNKNOWN` domains may remain in the TOP 50. It uses multiple public feeds and keeps a user-provided CSV as a manual fallback.
+Expired Domain Hunter is a standalone Python utility for automatically collecting, filtering, scoring, ranking, and reporting the **TOP 50 `.COM` domains from a public expired-source feed**. Availability is a separate RDAP-enriched property: `AVAILABLE`, `REGISTERED`, `PENDING`, `AUCTION`, and `UNKNOWN` are all explicitly labeled, and `UNKNOWN` domains may remain in the TOP 50. The scheduled pipeline uses only the public WhoisFreaks expired feed; a user-provided CSV remains an explicit local fallback, not a scheduled fallback.
 
 The project runs independently through GitHub Actions. Manus is not part of the runtime, and the application does not use a Manus API, Manus account, Manus credential, paid API, paid server, paid database, or paid hosting service.
 
@@ -8,7 +8,7 @@ The project runs independently through GitHub Actions. Manus is not part of the 
 
 ## What the system does
 
-On each run, the collector downloads multiple public expired/dropped feeds, keeps only expired or dropped lifecycle records, excludes pending-delete, auction, backorder, expiring, pre-release, bidding, buy-now, and aftermarket records, filters to `.COM`, deduplicates, and writes a normalized `input/domains.csv`. The hunter applies cheap local quality/spam filters, calculates the existing transparent 100-point score for all qualifying candidates, ranks them deterministically, selects the TOP 50, enriches those candidates with bounded RDAP and appropriate Wayback checks, and writes `output/results.csv`, `output/top_domains.txt`, `output/source_report.csv`, and JSON summaries. One consolidated TOP 50 Telegram report is sent only when the dataset fingerprint is genuinely new.
+On each scheduled run, the collector downloads only the public WhoisFreaks expired feed, admits only valid `.COM` rows from that feed, and writes a normalized `input/domains.csv`. Dropped, UniqueDomains, pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, buy-now, and aftermarket inventory is not admitted to the main dataset. The hunter then applies the existing cheap local quality/spam filters, transparent 100-point score, deterministic ranking, TOP 50 selection, bounded RDAP enrichment, and appropriate Wayback checks. It writes `output/results.csv`, `output/top_domains.txt`, `output/source_report.csv`, and JSON summaries. One consolidated TOP 50 Telegram report is sent only when the dataset fingerprint is genuinely new.
 
 The Wayback history step uses the public CDX endpoint only for shortlisted candidates, applies a request budget, uses timeouts and retries, and does not attempt to bypass CAPTCHAs, logins, anti-bot controls, rate limits, or access restrictions. The public CDX interface and archive browsing are documented by the Internet Archive [Wayback CDX Server project](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server) and [Wayback Machine](https://web.archive.org/).
 
@@ -19,7 +19,7 @@ The Wayback history step uses the public CDX endpoint only for shortlisted candi
 | `hunter.py` | Command-line entry point and end-to-end orchestration |
 | `config.py` | Thresholds, weights, network limits, and bid guardrails |
 | `collector.py` | Command-line automatic feed collector and normalized-input writer |
-| `src/collector.py` | Multiple public raw-feed downloads, lifecycle exclusion, `.COM` filtering, deduplication, provenance, dataset fingerprints, and source report |
+| `src/collector.py` | Public expired-feed download, non-expired lifecycle exclusion, `.COM` filtering, deduplication, provenance, dataset fingerprints, and source report |
 | `src/availability.py` | Conservative Verisign `.COM` RDAP status checks |
 | `src/state.py` | Persistent domain status and one-report-per-dataset notification state |
 | `src/data_source.py` | CSV import, column aliases, normalization, and invalid-row handling |
@@ -34,17 +34,17 @@ The Wayback history step uses the public CDX endpoint only for shortlisted candi
 | `output/top_domains.txt` | Human-readable TOP 50 report |
 | `.github/workflows/hunt.yml` | Daily and manual GitHub Actions execution |
 
-The primary feeds are the public [WhoisFreaks daily expired-and-dropped GitHub feed](https://github.com/WhoisFreaks/daily-expired-and-dropped-domains): [`0-latest-free-expired-domains.csv`](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv) and [`0-latest-free-dropped-domains.csv`](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-dropped-domains.csv). The secondary feed is the public [UniqueDomains expired-oneword extract](https://github.com/UniqueDomains/expired-oneword-domains), downloaded from [`expired.csv`](https://raw.githubusercontent.com/UniqueDomains/expired-oneword-domains/main/expired.csv). All three are public raw files; the collector does not scrape an interactive marketplace.
+The automatic source is the public [WhoisFreaks daily expired-and-dropped GitHub repository](https://github.com/WhoisFreaks/daily-expired-and-dropped-domains), specifically [`0-latest-free-expired-domains.csv`](https://raw.githubusercontent.com/WhoisFreaks/daily-expired-and-dropped-domains/main/0-latest-free-expired-domains.csv). The dropped file is deliberately not loaded. The public [UniqueDomains expired-oneword extract](https://github.com/UniqueDomains/expired-oneword-domains) was investigated but is not used because its `expired` status does not prove exclusion of redemption, pending-delete, marketplace, or auction inventory. ExpiredDomains.net and Expired-Domains.com were also investigated and excluded because they lack a permitted automated endpoint or prohibit automation. The full source/compliance record is maintained in [`docs/data_sources.md`](docs/data_sources.md).
 
-The WhoisFreaks files are newline-delimited and described by their publisher as daily free subsets. The UniqueDomains file is a daily public extract of expired one-word domains, but only 1,000 rows and not the full catalog. All records are normalized, filtered to `.COM`, and tagged with source provenance. A formal source and compliance comparison is maintained in [`docs/data_sources.md`](docs/data_sources.md). If the public feeds fail, the collector does not synthesize data: it preserves the existing `input/domains.csv` fallback and records `fallback_used` in `output/collection_summary.json`.
+The selected WhoisFreaks file is newline-delimited and described by its publisher as a daily free subset. The collector normalizes valid `.COM` rows, preserves the source URL and lifecycle label, and records feed metadata and hashes. If the public feed fails, the scheduled workflow stops; it does not silently use `input/domains.csv`. The fallback is available only for an explicit local collector invocation.
 
 ## TOP 50 quality and availability pipeline
 
 The runtime pipeline is intentionally ordered as follows:
 
-> Public expired/dropped sources → dataset fingerprint → expired/dropped-only lifecycle filter → `.COM` filter → deduplication → cheap local quality/spam filters → initial scoring → rank all qualifying domains → select TOP 50 → RDAP enrichment → Wayback/history where appropriate → final score → Telegram.
+> Public expired-only source → dataset fingerprint → expired-only lifecycle filter → `.COM` filter → deduplication → cheap local quality/spam filters → existing initial scoring → rank all qualifying domains → select TOP 50 → RDAP enrichment → Wayback/history where appropriate → final score → Telegram.
 
-The collector rejects records labeled pending, pending delete, redemption, auction, backorder, expiring, pre-release, bidding, buy now, or aftermarket. The hunter then applies cheap local quality and spam filters and calculates the existing 100-point score for every qualifying candidate with neutral history. Candidates are ranked by quality score, commercial intent, keyword quality, brandability, end-user potential, shorter length, and deterministic domain-name tie-breakers. The TOP 50 are selected by Hunter quality—not by RDAP status and not by input order. Verisign RDAP enriches those candidates only; a valid RDAP domain object is `REGISTERED`, a valid authoritative RDAP 404 error object is `AVAILABLE`, RDAP lifecycle/hold signals are `PENDING`, source lifecycle markers are `AUCTION`, and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. UNKNOWN domains remain eligible for the TOP 50 and are never described as available. AVAILABLE entries say: **AVAILABLE — verify at registrar before registration.**
+The collector admits only the selected expired feed and rejects any non-expired lifecycle input passed through explicit local/test arguments. Pending-delete, redemption, auction, backorder, expiring, pre-release, bidding, buy now, and aftermarket records are never relabeled as expired. The hunter then applies cheap local quality and spam filters and calculates the existing 100-point score for every qualifying candidate with neutral history. Candidates are ranked by quality score, commercial intent, keyword quality, brandability, end-user potential, shorter length, and deterministic domain-name tie-breakers. The TOP 50 are selected by Hunter quality—not by RDAP status and not by input order. Verisign RDAP enriches those candidates only; a valid RDAP domain object is `REGISTERED`, a valid authoritative RDAP 404 error object is `AVAILABLE`, RDAP lifecycle/hold signals are `PENDING`, source lifecycle markers are `AUCTION`, and timeouts, malformed responses, rate limits, access restrictions, or other inconclusive results are `UNKNOWN`. UNKNOWN domains remain eligible for the TOP 50 and are never described as available. AVAILABLE entries say: **AVAILABLE — verify at registrar before registration.**
 
 RDAP availability is a point-in-time registry signal, not a guarantee that a registrar checkout will succeed. Names can be registered between the check and registration, and registry-reserved or registrar-specific restrictions may exist. Every output and Telegram report therefore states **QUALITY SCORE ≠ AVAILABILITY**, labels every entry, and keeps UNKNOWN separate from AVAILABLE.
 
@@ -91,7 +91,7 @@ The required semantic field is `domain`. All other fields are optional. The impo
 | Semantic column | Examples | How it is used |
 |---|---|---|
 | `domain` | `smartinvoices.com` | Required; only syntactically valid `.com` names are accepted |
-| `status` | `expired`, `dropped`, `auction` | Explicit active/registered names are rejected |
+| `status` | `expired` | The main automatic collector admits only expired-source rows; active/registered, dropped, pending, auction, and other lifecycle states are rejected |
 | `backlinks` | `420` | Backlink-volume signal |
 | `ref_domains` | `58` | Referring-domain quality proxy |
 | `domain_age` | `12` | Age signal in years when supplied |
@@ -100,7 +100,7 @@ The required semantic field is `domain`. All other fields are optional. The impo
 | `search_volume` | `5400` | Commercial-demand proxy when supplied |
 | `source` | `provider-a` | Primary provenance carried into results |
 | `source_count` | `2` | Number of independent source providers for the row |
-| `sources` | `whoisfreaks-public-github;uniquedomains-public-extract` | Full source provenance list |
+| `sources` | `whoisfreaks-public-github-expired` | Full source provenance list |
 
 A minimal file is valid:
 
@@ -110,7 +110,7 @@ smartinvoices.com
 cloudledger.com
 ```
 
-The manual import procedure remains available: obtain a CSV from a source that permits automated access or download, map its domain field to `domain`, retain any useful optional metrics, save it as `input/domains.csv`, and run the hunter. Do not scrape or automate a service that explicitly prohibits bots, crawlers, or AI agents.
+The manual import procedure remains available for explicit local work: obtain a CSV from a source that permits the download, map its domain field to `domain`, retain useful optional metrics, ensure every row is genuinely expired and `.COM`, save it as `input/domains.csv`, and run the hunter. Do not scrape or automate a service that explicitly prohibits bots, crawlers, or AI agents. The scheduled workflow does not use this fallback.
 
 ## Filtering and risk signals
 
@@ -178,7 +178,7 @@ The workflow in `.github/workflows/hunt.yml`:
 2. Supports `workflow_dispatch` for manual execution.
 3. Restores and saves persistent dataset/domain state through the GitHub Actions cache.
 4. Installs Python dependencies.
-5. Downloads and normalizes the latest public expired and dropped feeds.
+5. Downloads and normalizes the latest public expired-only feed.
 6. Records ETag, Last-Modified, dataset date, content hashes, and source counts.
 7. Scores and ranks all locally qualifying domains, selects the TOP 50, and enriches those candidates with bounded RDAP/Wayback checks.
 8. Sends one TOP 50 Telegram report only when the dataset fingerprint is new.
@@ -212,7 +212,7 @@ The tests use fake HTTP sessions and do not send a Telegram message or make Wayb
 
 | Symptom | Resolution |
 |---|---|
-| `Automatic collection failed` | Check the public raw-feed URLs and GitHub connectivity. The collector preserves the manual fallback only when all public feeds fail. |
+| `Automatic collection failed` | Check the public expired-feed URL and GitHub connectivity. Scheduled runs stop rather than reusing the manual fallback. |
 | `No eligible .COM domains` | Check that `input/domains.csv` has a `domain` column and valid `.com` names. |
 | `TOP 50 report not sent` | Inspect `output/collection_summary.json` and persistent state. The dataset fingerprint may already be marked as reported, or Telegram credentials/delivery may have failed. |
 | Telegram summary not sent | Confirm both secret names are exact, the bot can message the target chat, and the dataset fingerprint is genuinely new. |
@@ -223,7 +223,7 @@ The tests use fake HTTP sessions and do not send a Telegram message or make Wayb
 
 ## Independence audit
 
-The runtime imports only Python standard-library modules plus `requests`, which is installed from `requirements.txt`. It downloads three public raw source files, records response metadata and content hashes, performs public Verisign `.COM` RDAP GET checks on TOP 50 entries, optionally calls public Wayback and Telegram HTTPS endpoints, and writes local output files. It uses GitHub Actions cache for persistent dataset and domain state and does not reference Manus packages, Manus environment variables, Manus APIs, Manus credentials, or another repository. The GitHub Actions workflow is sufficient to execute the project after the current development session ends.
+The runtime imports Python standard-library modules plus `requests`, `wordfreq`, and `wordninja` from `requirements.txt`. It downloads one public expired raw source file, records response metadata and content hashes, performs public Verisign `.COM` RDAP GET checks on TOP 50 entries, optionally calls public Wayback and Telegram HTTPS endpoints, and writes local output files. It uses GitHub Actions cache for persistent dataset and domain state and does not reference Manus packages, Manus environment variables, Manus APIs, Manus credentials, or another repository. The GitHub Actions workflow is sufficient to execute the project after the current development session ends.
 
 ## License and use
 

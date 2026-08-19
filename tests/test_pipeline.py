@@ -59,7 +59,7 @@ class PipelineTests(unittest.TestCase):
             input_path.write_text(
                 "domain,status,source\n"
                 "smartinvoices.com,expired,source-a\n"
-                "cloudledger.com,dropped,source-a\n",
+                "cloudledger.com,expired,source-a\n",
                 encoding="utf-8",
             )
             checker = FakeChecker({})

@@ -1,8 +1,3 @@
 domain,status,backlinks,ref_domains,domain_age,archive_year,keyword,search_volume,source
-fintechpay.com,dropped,5000,300,15,2008,fintech payments software,100000,example
-smartinvoices.com,dropped,420,58,12,2012,invoicing software,5400,example
-cloudledger.com,expired,180,31,8,2018,accounting software,2900,example
-brightorchard.com,expired,12,4,3,2022,brandable business,350,example
-x9x9-casino.com,expired,2500,70,10,2010,casino,20000,example
-example.net,expired,100,10,5,2019,software,1000,example
-activeproduct.com,active,50,10,4,2020,software,800,example
+cloudledger.com,expired,180,31,8,2018,accounting software,2900,manual-fallback
+brightorchard.com,expired,12,4,3,2022,brandable business,350,manual-fallback
