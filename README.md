@@ -147,7 +147,7 @@ The classification thresholds are:
 | 50–59 | WEAK |
 | Below 50 | IGNORE |
 
-The model gives its strongest name-quality credit to short recognized English words and selective natural two-word combinations. Three-or-more-word names, unrecognized tokens, generic modifiers, awkward order, repeated generic terms, difficult spelling, and random/generated-looking strings are penalized. The scoring model is deliberately calibrated so a poor dataset can have no domains above 70; it does not force BUY CANDIDATE or STRONG classifications.
+The model gives its strongest name-quality credit to short recognized English words and selective natural two-word combinations. It uses the free `wordfreq` frequency data and `wordninja` compound segmentation to distinguish common words, legitimate uncommon commercial terms, clean pronounceable brands, and random fragments. Generalized adjective+noun, noun+noun, verb+noun, and commercial category+product patterns are accepted only when the complete phrase is understandable. Three-or-more-word names, unrecognized tokens, generic modifiers, awkward order, repeated generic terms, difficult spelling, and random/generated-looking strings are penalized. The scoring model is deliberately calibrated so a poor dataset can have no domains above 70; it does not force BUY CANDIDATE or STRONG classifications.
 
 End-user potential is strict and specific. The model records a plausible industry only when the actual recognized words and their combination establish a concrete market signal. It does not append generic technology, ecommerce, or business-service explanations to arbitrary names. Potential buyers and resale value remain hypotheses requiring manual research.
 
@@ -190,7 +190,7 @@ To run it manually with the normal pipeline, select **Run workflow** and leave t
 
 ## Testing
 
-The repository includes dependency-light unit tests using Python’s standard library:
+The repository includes dependency-light unit tests using Python’s standard library, with the runtime scorer additionally using the free `wordfreq` and `wordninja` packages listed in `requirements.txt`:
 
 ```bash
 python -m unittest discover -s tests -v

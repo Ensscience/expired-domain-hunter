@@ -145,6 +145,30 @@ class HunterTests(unittest.TestCase):
         self.assertIn("manual verification", result.reason)
         self.assertLessEqual(float(result.suggested_max_bid.replace("$", "").replace(",", "")), 250)
 
+    def test_investor_quality_regression_matrix(self):
+        strong_one_word = evaluate(DomainCandidate(domain="balustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="balustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
+        self.assertGreaterEqual(strong_one_word.score, 60)
+        self.assertNotIn("unrecognized", strong_one_word.main_weakness)
+
+        strong_two_word = evaluate(DomainCandidate(domain="cloudledger.com", status="expired"), inspect_candidate(DomainCandidate(domain="cloudledger.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
+        self.assertGreaterEqual(strong_two_word.score, 60)
+        self.assertIn("Natural two-word", strong_two_word.main_strength)
+
+        natural_product = evaluate(DomainCandidate(domain="steelbalustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="steelbalustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
+        self.assertGreaterEqual(natural_product.score, 55)
+
+        uncommon_valid = evaluate(DomainCandidate(domain="balustrade.com", status="expired"), inspect_candidate(DomainCandidate(domain="balustrade.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
+        self.assertNotIn("unrecognized", uncommon_valid.main_weakness)
+
+        brandable = evaluate(DomainCandidate(domain="securelium.com", status="expired"), inspect_candidate(DomainCandidate(domain="securelium.com", status="expired")), HistorySignals(checked=False, historical_quality=4.0))
+        self.assertIn("coined", brandable.main_strength)
+        self.assertLess(brandable.score, 50)
+
+        for domain in ("payacel.com", "paydoshop.com", "shopicontech.com", "qzxvptk.com", "paymentshealthcenter.com"):
+            candidate = DomainCandidate(domain=domain, status="expired")
+            result = evaluate(candidate, inspect_candidate(candidate), HistorySignals(checked=False, historical_quality=4.0))
+            self.assertLess(result.score, 50, domain)
+
     def test_classification_bands_and_investor_examples(self):
         self.assertEqual(classification(95), "EXCEPTIONAL")
         self.assertEqual(classification(85), "STRONG")

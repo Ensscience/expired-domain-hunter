@@ -5,6 +5,9 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+
+from wordfreq import zipf_frequency
+import wordninja
 from functools import lru_cache
 
 from config import BID_VALUE_RATIO, MAX_MAX_BID, MAX_PENALTY, MIN_MAX_BID, PENALTIES, classification
@@ -29,12 +32,33 @@ STRONG_COMMERCIAL_TERMS = {
     "commerce", "commerce", "credit", "crm", "data", "email", "finance", "growth", "health", "pay",
     "income", "insurance", "invoice", "invoices", "ledger", "legal", "logistics", "marketing",
     "money", "payment", "payments", "property", "retail", "revenue", "sales", "secure", "software",
+    "cloud", "home", "legal", "security", "steel", "balustrade", "gates",
     "tax", "trade", "technology", "wallet", "wealth",
 }
 KNOWN_ABBREVIATIONS = {"ai", "crm", "otc", "saas", "seo", "api", "io", "hq"}
+FUNCTION_WORDS = {"a", "an", "the", "of", "to", "in", "on", "for", "by", "my", "go", "up"}
 
 # Pairs that are conventional enough to receive natural-order credit. The list
 # is deliberately selective; two commercial words are not automatically natural.
+COMMON_WORD_ZIPF = 3.0
+UNCOMMON_WORD_ZIPF = 2.0
+STRONG_WORD_ZIPF = 4.0
+CATEGORY_HEADS = {
+    "cloud", "health", "finance", "market", "trade", "data", "capital", "home",
+    "legal", "security", "steel", "property", "credit", "growth", "sales", "payment",
+    "payments", "invoice", "invoices", "money", "cash", "bank", "software", "email",
+    "commerce", "insurance", "business", "accounting", "care", "energy", "ledger",
+}
+ADJECTIVE_HEADS = {"fast", "smart", "secure", "bright", "green", "quick", "strong", "simple", "fresh", "clear", "safe", "easy", "active", "best", "better", "direct", "global", "modern", "premium", "prime"}
+VERB_HEADS = {"buy", "build", "grow", "find", "save", "protect", "track", "manage", "check", "make", "run", "share", "scale", "invest"}
+
+PRODUCT_NOUNS = {
+    "balustrade", "ledger", "invoice", "invoices", "billing", "care", "gates", "prices",
+    "center", "market", "sales", "stories", "window", "windows", "service", "services",
+    "studio", "lab", "flow", "future", "energy", "capital", "property", "money", "bank",
+    "software", "security", "insurance", "accounting", "analytics", "commerce", "technology",
+}
+
 NATURAL_PAIRS = {
     ("cloud", "pay"), ("cloud", "ledger"), ("cloud", "data"), ("fast", "money"),
     ("smart", "invoice"), ("smart", "invoices"), ("smart", "billing"), ("secure", "pay"),
@@ -87,8 +111,25 @@ def _vowel_ratio(text: str) -> float:
     return sum(char in "aeiou" for char in letters) / len(letters)
 
 
+def _word_frequency(token: str) -> float:
+    if len(token) < 3 and token not in FUNCTION_WORDS and token not in KNOWN_ABBREVIATIONS:
+        return 0.0
+    return zipf_frequency(token, "en")
+
+
 def _known_word(token: str) -> bool:
-    return token in ENGLISH_WORDS or token in KNOWN_ABBREVIATIONS
+    if token in ENGLISH_WORDS or token in KNOWN_ABBREVIATIONS or token in FUNCTION_WORDS:
+        return True
+    minimum = 2.5 if len(token) <= 3 else UNCOMMON_WORD_ZIPF
+    return _word_frequency(token) >= minimum
+
+
+def _common_word(token: str) -> bool:
+    return token in ENGLISH_WORDS or token in KNOWN_ABBREVIATIONS or _word_frequency(token) >= COMMON_WORD_ZIPF
+
+
+def _uncommon_valid_tokens(tokens: list[str]) -> list[str]:
+    return [token for token in tokens if _known_word(token) and not _common_word(token) and token not in FUNCTION_WORDS]
 
 
 def _best_segmentation(text: str) -> list[str] | None:
@@ -99,8 +140,8 @@ def _best_segmentation(text: str) -> list[str] | None:
         if position == len(text):
             return ()
         best: tuple[str, ...] | None = None
-        for word in sorted(ENGLISH_WORDS | KNOWN_ABBREVIATIONS, key=len, reverse=True):
-            if len(word) < 3 and word not in KNOWN_ABBREVIATIONS:
+        for word in sorted(ENGLISH_WORDS | KNOWN_ABBREVIATIONS | FUNCTION_WORDS, key=len, reverse=True):
+            if len(word) < 3 and word not in KNOWN_ABBREVIATIONS and word not in FUNCTION_WORDS:
                 continue
             if text.startswith(word, position):
                 remainder = solve(position + len(word))
@@ -124,10 +165,16 @@ def _semantic_tokens(candidate: DomainCandidate) -> list[str]:
     full = _best_segmentation(text)
     if full:
         return full
+    if _known_word(text) and _word_frequency(text) >= UNCOMMON_WORD_ZIPF:
+        return [text]
 
     # Partial segmentation gives a conservative known-word plus unknown-word
     # representation for names such as data+kudi and ukran+tech.
-    words = sorted(ENGLISH_WORDS | KNOWN_ABBREVIATIONS, key=len, reverse=True)
+    ninja_tokens = [token.lower() for token in wordninja.split(text)]
+    if len(ninja_tokens) >= 2 and all(_known_word(token) for token in ninja_tokens):
+        return ninja_tokens
+
+    words = sorted(ENGLISH_WORDS | KNOWN_ABBREVIATIONS | FUNCTION_WORDS, key=len, reverse=True)
     for word in words:
         if len(word) >= 3 and text.startswith(word) and len(text) - len(word) >= 3:
             return [word, text[len(word):]]
@@ -146,6 +193,19 @@ def _generic_tokens(tokens: list[str]) -> list[str]:
     return [token for token in tokens if token in GENERIC_TERMS]
 
 
+def _pronounceable_brandable(candidate: DomainCandidate, filters: FilterResult, tokens: list[str], real_ratio: float, generic_count: int = 0, trademark_risk: bool = False) -> bool:
+    label = _label(candidate)
+    if real_ratio >= 1 or generic_count or trademark_risk or filters.numbers or filters.hyphens or filters.awkward_spelling:
+        return False
+    if not 5 <= len(label) <= 10:
+        return False
+    if not 0.30 <= _vowel_ratio(label) <= 0.65:
+        return False
+    if len(tokens) > 2:
+        return False
+    return not bool(re.search(r"[^aeiou]{4,}", label))
+
+
 def _strong_terms(tokens: list[str], candidate: DomainCandidate) -> set[str]:
     keyword_tokens = set(re.findall(r"[a-z]+", candidate.keyword.lower()))
     return (set(tokens) | keyword_tokens) & STRONG_COMMERCIAL_TERMS
@@ -153,9 +213,23 @@ def _strong_terms(tokens: list[str], candidate: DomainCandidate) -> set[str]:
 
 def _is_natural_combination(tokens: list[str]) -> bool:
     if len(tokens) == 1:
-        return _known_word(tokens[0])
-    if len(tokens) == 2:
-        return tuple(tokens) in NATURAL_PAIRS
+        return _common_word(tokens[0]) or _word_frequency(tokens[0]) >= UNCOMMON_WORD_ZIPF
+    if len(tokens) != 2:
+        return False
+    pair = tuple(tokens)
+    if pair in NATURAL_PAIRS:
+        return True
+    left, right = pair
+    if not (_known_word(left) and _known_word(right)):
+        return False
+    if left in FUNCTION_WORDS or right in FUNCTION_WORDS:
+        return False
+    if left in CATEGORY_HEADS and right in PRODUCT_NOUNS and right not in GENERIC_TERMS:
+        return True
+    if left in ADJECTIVE_HEADS and right in PRODUCT_NOUNS and right not in GENERIC_TERMS:
+        return True
+    if left in VERB_HEADS and right in PRODUCT_NOUNS and right not in GENERIC_TERMS:
+        return True
     return False
 
 
@@ -178,7 +252,7 @@ def _has_commercial_signal(candidate: DomainCandidate, tokens: list[str]) -> boo
     return bool(_strong_terms(tokens, candidate))
 
 
-def _brandability(candidate: DomainCandidate, filters: FilterResult, tokens: list[str], natural: bool, real_ratio: float, generic_count: int) -> int:
+def _brandability(candidate: DomainCandidate, filters: FilterResult, tokens: list[str], natural: bool, real_ratio: float, generic_count: int, pronounceable_brandable: bool = False) -> int:
     label = _label(candidate)
     score = 0
     if len(tokens) == 1 and real_ratio == 1 and len(label) <= 10:
@@ -187,6 +261,8 @@ def _brandability(candidate: DomainCandidate, filters: FilterResult, tokens: lis
         score += 12
     elif len(tokens) == 2 and real_ratio == 1:
         score += 6
+    elif pronounceable_brandable:
+        score += 8
     elif real_ratio >= 0.5:
         score += 3
     if 1 <= len(label) <= 8:
@@ -313,7 +389,9 @@ def _industries(candidate: DomainCandidate, tokens: list[str]) -> list[str]:
         "legal": "legal services",
         "logistics": "logistics software",
         "marketing": "marketing software",
-        "money": "payments and finance",
+        "bank": "payments and finance",
+        "balustrade": "architectural products",
+        "gates": "security and building products",
         "payment": "payments software",
         "payments": "payments software",
         "property": "property services",
@@ -388,7 +466,8 @@ def evaluate(candidate: DomainCandidate, filters: FilterResult, history: History
     natural = _is_natural_combination(tokens)
     strong = _strong_terms(tokens, candidate)
     trademark_risk = _trademark_pattern(candidate, tokens, filters)
-    brandability = _brandability(candidate, filters, tokens, natural, real_ratio, len(generic))
+    pronounceable_brandable = _pronounceable_brandable(candidate, filters, tokens, real_ratio, len(generic), trademark_risk)
+    brandability = _brandability(candidate, filters, tokens, natural, real_ratio, len(generic), pronounceable_brandable)
     commercial = _commercial_intent(candidate, tokens, natural, real_ratio, len(generic))
     keyword_quality = _keyword_quality(candidate, tokens, natural, real_ratio, len(generic))
     length_readability = _length_readability(candidate, filters, tokens, natural)
@@ -409,7 +488,7 @@ def evaluate(candidate: DomainCandidate, filters: FilterResult, history: History
     penalty += PENALTIES["weak_commercial_potential"] if not strong else 0
     penalty += PENALTIES["generic_suffix"] if generic and not natural else 0
     penalty += PENALTIES["keyword_stuffing"] if (len(generic) >= 2 and not natural) or len(tokens) >= 3 else 0
-    penalty += PENALTIES["invented_string"] if real_ratio < 1 else 0
+    penalty += (PENALTIES["invented_string"] if not pronounceable_brandable else max(3, PENALTIES["invented_string"] // 2)) if real_ratio < 1 else 0
     penalty += PENALTIES["long_three_word"] if len(tokens) >= 3 else 0
     penalty = min(MAX_PENALTY, penalty)
     score = max(0, min(100, round(positive - penalty)))
@@ -425,33 +504,44 @@ def evaluate(candidate: DomainCandidate, filters: FilterResult, history: History
     else:
         risk = "low"
 
-    if len(tokens) == 1 and real_ratio == 1:
-        main_strength = "Short recognized English word with clean recall and single-name brandability."
+    recognized_tokens = [token for token in tokens if _known_word(token)]
+    unknown_tokens = [token for token in tokens if not _known_word(token)]
+    if len(tokens) == 1 and real_ratio == 1 and _common_word(tokens[0]):
+        main_strength = f"Exact common English word: {tokens[0]}; clean one-word .COM structure and broad recall."
+    elif len(tokens) == 1 and real_ratio == 1:
+        main_strength = f"Valid but less-common English term: {tokens[0]}; concise .COM structure with a specific market to validate."
     elif len(tokens) == 2 and real_ratio == 1 and natural:
         main_strength = f"Natural two-word phrase: {' '.join(tokens)}."
-    elif strong and natural and real_ratio == 1:
-        main_strength = f"Clear commercial phrase for {', '.join(industries[:2]) or 'a specific business market'}."
-    elif real_ratio == 1:
-        main_strength = "Recognized English words provide some readability, but the phrase is not strongly established."
+    elif strong and real_ratio == 1:
+        main_strength = f"Recognized commercial terms ({', '.join(sorted(strong))}) indicate {', '.join(industries[:2]) or 'a specific business market'}, but the complete phrase needs buyer validation."
+    elif pronounceable_brandable:
+        main_strength = "Pronounceable coined brand with clean spelling; value depends on buyer adoption rather than dictionary meaning."
+    elif recognized_tokens:
+        main_strength = f"Readable component(s): {', '.join(recognized_tokens[:3])}; the remaining structure does not establish a clear resale market."
     else:
-        main_strength = "No strong investor-grade naming strength was established from the available signals."
+        main_strength = "No recognized English or commercial word pattern supports investor-grade demand."
 
     weaknesses: list[str] = []
-    if real_ratio < 1:
-        weaknesses.append("contains an unrecognized or invented token")
+    if real_ratio < 1 and not pronounceable_brandable:
+        label = ', '.join(unknown_tokens[:2]) or 'one or more tokens'
+        weaknesses.append(f"unrecognized or invented token(s): {label}")
+    elif pronounceable_brandable:
+        weaknesses.append("coined rather than dictionary-based; resale depends on buyer adoption")
     if len(tokens) >= 3:
         weaknesses.append("three-or-more-word structure")
     if generic and not natural:
         weaknesses.append("generic modifier or keyword-stuffed combination")
     if len(tokens) >= 2 and not natural:
-        weaknesses.append("word combination is not a clearly natural phrase")
-    if not strong:
-        weaknesses.append("weak specific commercial intent")
+        weaknesses.append(f"word combination '{' '.join(tokens)}' is not a natural phrase")
+    if not strong and real_ratio == 1 and len(tokens) <= 2 and not natural:
+        weaknesses.append("no clear commercial use case or broad buyer pool")
     if trademark_risk:
         weaknesses.append("possible trademark/company-name pattern")
+    if len(_label(candidate)) > 12:
+        weaknesses.append("longer or niche label may limit buyer pool")
     if filters.numbers or filters.hyphens or filters.awkward_spelling:
         weaknesses.append("spelling or formatting friction")
-    main_weakness = "; ".join(weaknesses[:2]) or "No major structural weakness detected, subject to manual review."
+    main_weakness = "; ".join(weaknesses[:2]) or "Buyer breadth and resale demand still require market validation."
 
     reasons: list[str] = [main_strength, f"Main weakness: {main_weakness}"]
     if industries and natural and strong:
